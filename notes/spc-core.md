@@ -41,6 +41,14 @@ actually says. Confirm the package from the chip marking before trusting pin nam
 - **Open-drain-style** (OE routed, no data out): J9 J7 K7 (top bank), B11 (open-drain with
   readback) – I2C (HDMI transmitter config?) candidates.
 
+## Hardware hints from forums (unverified)
+
+- Atari-Forum thread on the Super Nt (https://www.atari-forum.com/viewtopic.php?t=33187): main parts
+  reported as a Cyclone V E with 18.5K ALMs (= 5CEBA4, 49K LE) and a **PIC32MX microcontroller
+  handling the SD card** and housekeeping. Analogue said the board is virtually the same as the
+  Nt Mini's, minus analog AV. If true, cores get SD data from the PIC32 over some bus (the left-bank
+  8-bit bus + 7 outputs is a candidate), not by reading the SD card themselves.
+
 ## Open questions
 
 - How the SPC data reaches the core (SD read by the core itself vs handed over in DDR kept in
