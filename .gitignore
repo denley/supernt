@@ -1,0 +1,10 @@
+firmware/
+build/
+*.bt
+*.rbf
+*.cor
+tools/mistral-patch
+tools/rbfcycle
+out/
+__pycache__/
+tools/mistral-cv
