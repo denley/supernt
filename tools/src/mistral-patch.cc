@@ -1,3 +1,7 @@
+// Copy of mistral-cv/main.cc from https://github.com/Ravenslofty/mistral (BSD 3-Clause,
+// Copyright (c) 2020-2021 Olivier Galibert) with an added "patch" command. Search for
+// "supernt" for the changes.
+
 #undef _FORTIFY_SOURCE
 
 #include "cyclonev.h"
