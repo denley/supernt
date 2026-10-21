@@ -19,7 +19,8 @@ pulling it.
   Denley's first boot with the card was slow, which fits. JB7.2 (Jul 2023) is still the latest
   release (github.com/analoguejb/Analogue-Super-Nt-JB). Check: Tools has "Reload Save RAM"
   (new in 7.2). The `.bin` was deleted from the card after the update.
-- Installed `01-spc-colortest` as `spc.cor`, then `05-vtest` (21 Oct evening).
+- Installed `01-spc-colortest` as `spc.cor`, then `05-vtest`, then `07-buslog` rebuilt with
+  the fixed sync order (21 Oct evening).
 - The card had no `.spc` files. `tools/mkspc.py` makes `SPC/Super Nt test chord.spc`: a steady
   A major chord (440/554/659 Hz square waves; checked with libgme). Copied to
   the card 21 Oct; `tools/sdcore setup` copies it too.
@@ -44,3 +45,9 @@ pulling it.
   screen" report was the file not being started properly.) Denley's description: "a wave pattern that said
   'super nt test' with various colours" (the player's visualiser and the ID666 title). Whether
   the colours were scrambled can't be told from that; vtest (next) settles whether our bits run.
+- 21 Oct 2026, `05-vtest` (open-source flow, our own design): **picture.** About once a minute
+  (one of the 6 sync orders), 4 boxes = order 3: P16 = VSYNC, M16 = DE, M18 = HSYNC. Stripes:
+  green, red, blue groups, each with the last stripe brightest, so each group's bits are
+  reversed relative to the proposal (mapping now in `notes/spc-core.md`). White block white.
+  Photo: `photos/vtest-2026-10-21.jpg`. So: our bitstreams configure the FPGA, the 74.25 MHz W16
+  clock is right, and the AD9889B is left configured for 720p RGB with separate syncs.

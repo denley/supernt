@@ -8,25 +8,25 @@
 // quartus/common/supernt.tcl).
 module top #(
     parameter ROM_HEX    = "../../build/snes/sa1test.hex",
-    // Colour channel mapping, the one place to change it: which colour goes to the proposed
-    // pin groups ch1/ch2/ch3 (notes/spc-core.md). 0: R,G,B  1: R,B,G  2: G,R,B  3: G,B,R
-    // 4: B,R,G  5: B,G,R.
+    // Colour channel mapping: which colour goes to the pin groups ch1/ch2/ch3. pins.tcl already
+    // assigns ch1/ch2/ch3 = R/G/B as confirmed on the console (vtest, 21 Oct 2026), so 0.
+    // 0: R,G,B  1: R,B,G  2: G,R,B  3: G,B,R  4: B,R,G  5: B,G,R.
     parameter CH_ORDER   = 0,
-    // HS/VS/DE roles of P16/M16/M18: -1 cycles through the 6 orders every 8 s (as vtest; the
-    // number of white boxes top left = order + 1), 0-5 fixes one (table in snes_video.sv).
-    parameter SYNC_ORDER = -1,
+    // HS/VS/DE roles of P16/M16/M18 (table in snes_video.sv). 3 = {VS, DE, HS}, confirmed on the
+    // console with vtest. -1 cycles through all 6 every 8 s (white boxes top left = order + 1).
+    parameter SYNC_ORDER = 3,
     parameter OUT_W      = 768,     // picture width on the 1280-pixel line (896 = 4:3)
     parameter LOCK       = 1,       // lock output frames to the SNES (snes_video.sv)
     parameter [15:0] RESET_CYCLES = 16'hffff  // core reset after PLL lock (clk_sys cycles)
 ) (
     input  wire       clk,      // W16, 74.25 MHz
     output wire       pclk,     // M22, pixel clock to the AD9889B
-    output wire       s0,       // P16 \
-    output wire       s1,       // M16  } HSYNC/VSYNC/DE in some order
-    output wire       s2,       // M18 /
-    output reg  [7:0] ch1,      // N19 N16 P18 P19 R21 R22 P22 N20 (bit 7..0)
-    output reg  [7:0] ch2,      // T22 R15 T18 T17 L22 M20 K22 K21
-    output reg  [7:0] ch3       // R17 P17 N21 M21 R16 T19 T15 T20
+    output wire       s0,       // P16 VSYNC \
+    output wire       s1,       // M16 DE     } with SYNC_ORDER 3
+    output wire       s2,       // M18 HSYNC /
+    output reg  [7:0] ch1,      // red:   K21 K22 M20 L22 T17 T18 R15 T22 (bit 7..0)
+    output reg  [7:0] ch2,      // green: N20 P22 R22 R21 P19 P18 N16 N19
+    output reg  [7:0] ch3       // blue:  T20 T15 T19 R16 M21 N21 P17 R17
 );
     // ---------------------------------------------------------------- clocks and reset
     wire clk_vid = clk;         // 720p pixel clock straight from the 74.25 MHz board clock

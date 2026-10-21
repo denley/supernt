@@ -72,11 +72,12 @@ SNES core with SA-1, all memory in block RAM, a built-in SA-1 test ROM, 720p60 o
 `SYSTEM/CORES/spc.cor` like the others; pick any `.spc` file to start it. Expected: a
 black screen with a green bar at the top and 7 green bars below it (one per SA-1 test; red = that
 test failed), a white square creeping right at the bottom (SNES CPU alive) and a faster cyan one
-above it (SA-1 alive). Like vtest it cycles the HSYNC/VSYNC/DE order of P16/M16/M18 every 8 s, so
-the picture may only show in one 8 s window out of ~48 s; the small white boxes top left count
-the working order + 1. **Take a photo** (and note if the bars aren't green: that's the colour
-order). Simulated (`make sim-snes`), not yet tried on the console; it drives only the video pins.
-Power-cycle to get back to the menu.
+above it (SA-1 alive). Sync order and colour pins are the ones vtest confirmed, so the picture
+should be steady. **Take a photo.** Simulated (`make sim-snes`), not yet tried on the console; it
+drives only the video pins. Power-cycle to get back to the menu.
+
+Console results so far (`notes/hardware-tests.md`): `spc-colortest` loads and runs; `vtest`
+gives a picture (sync order 3, colour map in `notes/spc-core.md`).
 
 The cores below replace `SYSTEM/CORES/spc.cor` too (keep the original). The `spc-` ones only
 flip output inverters on pins the SPC core already drives (2 configuration frames), so
@@ -100,8 +101,8 @@ electrically they only change logic levels on existing outputs.
 - `out/buslog.cor` – **PIC32 link logger** (all link pins are inputs, it never drives the bus).
   Replace spc.cor, then pick an `.spc` file: the PIC32 talks to it as if it were the SPC player
   and it shows the first transactions as hex on screen (format at the top of
-  `hw/buslog/buslog.v`; simulated with `make sim-buslog`). Same 720p/sync-order cycling as vtest,
-  and the page advances every full cycle, so **film the screen for ~3 minutes**.
+  `hw/buslog/buslog.v`; simulated with `make sim-buslog`). Fixed to the confirmed sync order; the
+  page (3 of them) advances every 16 s, so **film the screen for ~1 minute**.
 - `out/blinky.cor` – our first core built from scratch (open-source flow): a counter on the W16
   clock driving one HDMI colour pin. Nothing visible is expected; it only shows whether the console
   accepts a non-Quartus bitstream (no hang/error).

@@ -53,7 +53,9 @@ So the board has two clock inputs, **W16 and H16**, both consistent with 74.25 M
     (`M10K.022.023` ports a0–a19, `M10K.022.031` ports b0–b3), traced with `tools/ffsrc.py`.
     21 are straight RAM bits; R22 (a9), P17 (a13) and M21 (a15) go through a LUT that mixes in
     other sources (M21's mixes four more M10Ks – an overlay?).
-  - Sync/DE (logic, not RAM): P16, M16, M18.
+  - Sync/DE (logic, not RAM): **P16 = VSYNC, M16 = DE, M18 = HSYNC** (confirmed on the console
+    with vtest, 21 Oct 2026: only order 3 gave a picture, 720p60 with positive syncs, pixel clock
+    on M22 = inverted 74.25 MHz board clock).
   - Clock outputs: M22 (from `CMUXHG`, pixel clock), L17 and L19 (from `CMUXVG`, audio MCLK/BCLK).
   - K17, L18: I2S LRCLK/data.
   - Port → pin: a0 N19, a1 N16, a2 P18, a3 P19, a4 T22, a5 R15, a6 T18, a7 T17, a8 R21, a9 R22,
@@ -61,14 +63,20 @@ So the board has two clock inputs, **W16 and H16**, both consistent with 74.25 M
     b0 R16, b1 T19, b2 T15, b3 T20.
   - The RAM's initial contents include a 16-entry grey ramp in which bits {a0,a4,a12}
     {a1,a5,a13} … {a11,a19,b3} are always equal, i.e. one bit position per triple, one member per
-    channel. With Quartus' MSB-first port order that gives (unconfirmed, and which channel is R/G/B
-    is unknown):
+    channel. **Confirmed on the console** (vtest photo, 21 Oct 2026: each group's last stripe was
+    the brightest, the one before it half as bright, and the groups were green, red, blue):
 
-    | channel | bit 7 → bit 0 |
+    | colour | bit 7 → bit 0 |
     |---|---|
-    | ch1 | N19 N16 P18 P19 R21 R22 P22 N20 |
-    | ch2 | T22 R15 T18 T17 L22 M20 K22 K21 |
-    | ch3 | R17 P17 N21 M21 R16 T19 T15 T20 |
+    | red | K21 K22 M20 L22 T17 T18 R15 T22 |
+    | green | N20 P22 R22 R21 P19 P18 N16 N19 |
+    | blue | T20 T15 T19 R16 M21 N21 P17 R17 |
+
+    Bits 7 and 6 of each colour are directly confirmed; the lower bits follow from the ramp
+    triples (too dim to see on the photo). The first proposal had the groups right but every
+    group's bit order reversed (it assumed MSB-first port order). `hw/vtest` and the other
+    `hw/` designs still use the old proposal's `ch1/ch2/ch3` port names = green/red/blue with
+    reversed bits; `quartus/snes/pins.tcl` uses the confirmed mapping.
 - **Left bank 2A and bottom bank 3B: two 8-bit bidirectional buses** – most likely the DQ buses of
   the two x8 SDRAMs (clock AB11), with address/control on the neighbouring outputs.
   - 2A data D3 E2 L2 L1 G2 G1 C2 C1; outputs W2 AA2 AA1 U2 U1 N2 N1.

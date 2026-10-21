@@ -149,15 +149,12 @@ output, new data on read-during-write, powers up as zero) on `clk_sys`, matching
     exactly 750 lines/60.000 Hz, but the picture then rolls/tears (the ring holds only 16
     lines, so the free-running output shows mismatched lines; a full frame buffer needs SDRAM).
   - Interlaced SNES modes are shown with both fields on the same lines (no deinterlacing).
-- **Sync roles and colour mapping** (the unknowns from `out/vtest.cor`):
-  - `SYNC_ORDER` (top-level parameter): `-1` (default) cycles the HS/VS/DE roles of P16/M16/M18
-    through the same 6 orders as `hw/vtest/vtest.v`, 8 s each. The number of small white boxes
-    in the top-left border (224-line mode only) is the order + 1, like vtest. Once vtest has
-    shown which order works, set `SYNC_ORDER` to that index (0–5) in `snes_top.sv`.
-  - `CH_ORDER` (top-level parameter, the one place for the colour mapping): which of R/G/B goes
-    to the proposed pin groups ch1/ch2/ch3 (`notes/spc-core.md`). 0 = R,G,B (default, unconfirmed);
-    the table is in `snes_top.sv`. If a channel's bit order also turns out reversed, fix it in
-    `pins.tcl`.
+- **Sync roles and colour mapping** (confirmed with `out/vtest.cor` on the console, 21 Oct 2026):
+  - `SYNC_ORDER` (top-level parameter) = 3: P16 = VSYNC, M16 = DE, M18 = HSYNC. `-1` still
+    cycles the 6 orders of `hw/vtest/vtest.v`, 8 s each (small white boxes in the top-left
+    border, 224-line mode only, = order + 1).
+  - Colours: `pins.tcl` assigns ch1/ch2/ch3 = red/green/blue, bit 7..0, per the vtest photo
+    (`notes/spc-core.md`). `CH_ORDER` (default 0 = R,G,B) can still permute the channels.
 
 ## Test ROM
 

@@ -28,7 +28,7 @@ module top (
     input  wire [7:0] data,
     input  wire [3:0] xin
 );
-    parameter integer SYNC_PERM = -1;   // -1: cycle all 6 orders (8 s each); 0-5: fixed
+    parameter integer SYNC_PERM = 3;    // 3 = {VS, DE, HS}, confirmed with vtest; -1: cycle all 6
 
     localparam H_ACT = 1280, H_FP = 110, H_SYNC = 40, H_TOT = 1650;
     localparam V_ACT = 720,  V_FP = 5,   V_SYNC = 5,  V_TOT = 750;
