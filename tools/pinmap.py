@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Per-pin I/O usage from a mistral-cv .bt decompile, ignoring default clock routes.
 
-Usage: pinmap.py file.bt pins.txt [--all]
+Usage: pinmap.py file.bt pins.txt [--hmc hmc-bypass.txt] [--all]
 
-pins.txt is `tools/cvinfo pins MODEL` output (pin name -> GPIO block/index/bank).
+pins.txt is `tools/cvinfo pins MODEL` output (pin name -> GPIO block/index/bank);
+hmc-bypass.txt is `tools/cvinfo hmc MODEL` output (HMC bypass port -> GPIO port), needed
+for top-bank pins the fabric drives or reads through the hard memory controller's bypass.
 For each pin prints: bank, what drives DATAOUT and OEIN (traced back to a block
 port), how many block ports its DATAIN reaches, and the non-default settings
 (open drain, pull-up, I/O standard...). Pins with nothing routed and no
@@ -20,19 +22,27 @@ import trace  # noqa: E402
 def main():
     bt, pinsf = sys.argv[1], sys.argv[2]
     show_all = '--all' in sys.argv
+    hmcf = sys.argv[sys.argv.index('--hmc') + 1] if '--hmc' in sys.argv else None
     drv, fan = trace.load(bt)
     # Top-bank pins reach the fabric through the hard memory controller's bypass
-    # ports; mistral prints those links as comments on HMC inverter lines:
+    # ports. mistral prints the link only as a comment on HMC inverter lines,
     #   i HMC.011.045:IOINTDQDOUT.8 1 ; C11 ; HMC...:PHYDDIODQDOUT.8 GPIO.032.045.2:DATAOUT.0
+    # and most bypass routes have none (r TD... HMC.011.045:IOINTDQDOUT.64 ; K16), so
+    # take the full table from mistral's database when given.
+    links = []    # (HMC port, GPIO port, from an inverter line)
     for line in open(bt):
         if line.startswith('i HMC') and line.count(' ; ') == 2:
-            hmc = line.split()[1]
-            gpio = line.rstrip().split()[-1]
-            if gpio.startswith('GPIO.'):
-                if gpio.split(':')[1].startswith(('DATAOUT', 'OEIN')):
-                    drv.setdefault(gpio, hmc)
-                else:
-                    fan[gpio].append(hmc)
+            links.append((line.split()[1], line.rstrip().split()[-1], True))
+    if hmcf:
+        links += [(*line.split()[:2], False) for line in open(hmcf)]
+    for hmc, gpio, inv_line in links:
+        if not gpio.startswith('GPIO.'):
+            continue
+        if gpio.split(':')[1].startswith(('DATAOUT', 'OEIN')):
+            if inv_line or hmc in drv:    # an unrouted port with an inverter = constant
+                drv.setdefault(gpio, hmc)
+        elif hmc in fan and hmc not in fan[gpio]:
+            fan[gpio].append(hmc)
 
     pins = {}
     for line in open(pinsf):
@@ -68,7 +78,7 @@ def main():
             out = 'const(inv)'
         for k in ('OEIN.0', 'OEIN.1'):
             p = f'{gpio}:{k}'
-            if p in drv:
+            if p in drv and (not oe or oe.startswith('HMC')):   # prefer a fabric driver
                 oe = trace.back(drv, p)[-1]
                 if oe.startswith('HMC') and oe in drv:
                     oe = trace.back(drv, oe)[-1] + ' (via HMC)'

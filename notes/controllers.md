@@ -1,7 +1,9 @@
 # Controller ports in spc.cor (JB7.2)
 
 Decoded from `build/spc.bt` (Analogue's spc.cor) with `tools/netlist.py` and a cycle model in
-`~/scratch/padre/` (throwaway). Oct 2026. Tags: **[confirmed]** (two independent lines of
+`~/scratch/padre/` (throwaway). Oct 2026. Re-simulated after the two decode fixes went into
+the tool (`~/scratch/netfix/poller.py`, `pollrun.py`, throwaway): the poller now runs from
+power-up with nothing assumed; timing and the shift-register clock changed (marked "Changed"). Tags: **[confirmed]** (two independent lines of
 evidence), **[likely]** (clean decode, one line of evidence), **[guess]**.
 
 ## Summary
@@ -14,7 +16,8 @@ evidence), **[likely]** (clean decode, one line of evidence), **[guess]**.
 - **Only one data line is read.** No other pin in spc.cor behaves like a pad input. Port 2
   data, the D1 lines and IOBit are either on pins spc.cor leaves unconfigured or not wired to
   the FPGA. Their pins are unknown.
-- **Roles**, from a cycle model that needed one assumed polarity fix (see Derivation):
+- **Roles**, from a cycle model of the decoded logic (no assumed fixes any more, see
+  Derivation):
   - P14 = LATCH;
   - J13 and K16 = CLOCK, the same signal on two pins (most likely port 1 and port 2 clock);
   - T12 = port 1 DATA (D0), inverted on input so that a stored 1 means the line is low
@@ -33,9 +36,10 @@ evidence), **[likely]** (clean decode, one line of evidence), **[guess]**.
 "Confirmed" for J13/K16 as poller outputs: they are driven combinationally from
 `LAB.029.011.8` (= `029.011.5.FFT0 & 029.011.1.FFB1`), which is inside the same register
 cone as P14 and the T12 shift enable. A route trace (`tools/trace.py back
-HMC.011.045:IOINTDQDOUT.64`) and the netlist agree on this. `build/spc-pinmap.txt` misses
-both pins: it lists only the default HMC OE for them, not the fabric-driven bypass data port.
-The same blind spot hides about 25 other top-bank outputs (the x16 SDRAM, see below).
+HMC.011.045:IOINTDQDOUT.64`) and the netlist agree on this. `build/spc-pinmap.txt` used to
+miss both pins (it listed only the default HMC OE, not the fabric-driven bypass data port) and
+the x16 SDRAM's top-bank outputs; fixed, it now lists all of them, and `netlist.py J13` follows
+the bypass too.
 
 ### Earlier candidates, now explained
 
@@ -63,7 +67,7 @@ LAB.029.011.2:FFT0 LAB.029.012.5:T LAB.029.012.5:B LAB.024.015.5:T`). Its only l
   given in clocks and at 21.477 MHz.
 - **Power-on delay** [likely]: a 22-bit saturating counter (`036.013`, `036.014` + LSB
   `036.014.2.FFB1`) holds the whole FSM in sync clear until it reaches all ones. That is
-  2^22 clocks ≈ 195 ms. The outputs are also gated by a sticky "first cycle done" FF
+  2^22 clocks ≈ 195 ms (simulated: first latch at clock 4 194 305 = 2^22 + 1). The outputs are also gated by a sticky "first cycle done" FF
   (`029.011.1.FFB1`), so P14 and J13/K16 are 0 until the first poll.
 - **Interval timer** [likely]: a 20-bit down-counter (`032.013` carry chain; the low bits live
   in `029.012.x`/`029.011.3–4`). When it reaches 0 it reloads with a state-dependent constant.
@@ -71,18 +75,22 @@ LAB.029.011.2:FFT0 LAB.029.012.5:T LAB.029.012.5:B LAB.024.015.5:T`). Its only l
 
   | reload + 1 (clocks) | µs @ 21.477 MHz | reading (model) |
   |---|---|---|
-  | 333 318 – 333 750 | ≈ 15 520 | idle wait between polls (the "b" state) |
-  | 385 – 433 | 17.9 – 20.2 | latch high / clock high |
-  | 161 – 177 | 7.5 – 8.2 | first clock-low after latch |
-  | 13 – 17 | 0.6 – 0.8 | clock low pulse |
+  | 333 318 – 333 750 | ≈ 15 520 | idle wait between polls |
+  | 385 – 433 | 17.9 – 20.2 | clock high between bits (401 in the simulation) |
+  | 161 – 177 | 7.5 – 8.2 | latch high (178), latch fall → first clock low (176) |
+  | 13 – 17 | 0.6 – 0.8 | clock low pulse (13) |
+
+  (Reading column changed with the new simulation: the latch is the ~8 µs constant, not the
+  ~18 µs one.)
 
 - **Bit counter** [likely]: `036.012`, a 7-bit down-counter. It loads 32 at the start of a
   poll and steps once per bit, so a poll covers 33 clock edges / 34 samples. More than a
   standard pad's 16 bits are clocked, which would also cover a mouse or the 4 ID bits.
 - **Data path** [likely]:
   - T12 → `029.003.2.FFB0` (= ~T12, one synchroniser FF on the poller clock).
-  - → shift register: at least 22 FFs in `024.015`/`025.015.7`, CLK2 (inverted = falling
-    edge), shift enable `029.012.5.B` = timer-zero ∧ FSM bit `029.011.9.FFT0`.
+  - → shift register: at least 22 FFs in `024.015`/`025.015.7`, on the poller clock's rising
+    edge like everything else (changed: was "CLK2, inverted = falling edge", the clock-select
+    misreading), shift enable `029.012.5.B` = timer-zero ∧ FSM bit `029.011.9.FFT0`.
   - → parallel capture into `025.015.x`/`024.015.2/5/6` (link clock domain, enable
     `029.012.5.T` = timer-zero ∧ wait state).
   - The capture is cleared unless six of the shifted bits match a fixed pattern
@@ -91,32 +99,42 @@ LAB.029.011.2:FFT0 LAB.029.012.5:T LAB.029.012.5:B LAB.024.015.5:T`). Its only l
     register stage (`025.015.5/6/8`).
   - I could not make the check pattern fit a standard pad for any bit count, so the exact
     bit-to-shift-stage mapping (and which bits the PIC sees) is [guess].
+  - Re-check with the fixed tool (`~/scratch/netfix/padmap.py`: a 4021 model loading while
+    P14 is high and shifting on J13's rising edge, one button held per run): at the capture
+    pulse only pad bits 11–15 are still in the poller-clock stages (`024.015.7.FFT0`,
+    `.8.FFB0/FFB1`, `.4.FFB1`, `.1.FFB0`, `.9.FFT1`); bits 0–10 have been shifted past them by
+    the 33 samples, and the check `024.015.5.T` stays 1 throughout. So either the capture also
+    takes earlier stages from the link-clock FFs in `025.015`, or the device isn't a plain
+    16-bit 4021 read. Not followed further.
 
-## Timing (cycle model, [guess] for the sequence, [likely] for each duration)
+## Timing (cycle model, [likely])
 
-One period = 347 533 clocks ≈ 16.18 ms (61.8 Hz at 21.477 MHz):
+**Changed.** The earlier sequence (latch ≈ 18 µs, clock idling low, 33 periods of 414
+clocks) came from a hand-coded model with one LUT flipped. With the fixed tool the decoded
+logic runs unmodified, from all-zero FFs, for 5.4 M clocks (4 polls). One period = **347 351
+clocks ≈ 16.17 ms** (61.8 Hz at 21.477 MHz):
 
 ```
 t (clocks)   P14  J13/K16
-0            0    0        capture previous poll, idle wait (333 326 clocks ≈ 15.5 ms)
-333 326      1    1        LATCH high (P14), clock goes high with it
-333 711      0    0        latch falls; sample bit 0; clock low 173
-333 884      0    1        clock rises (pad shifts)
-334 285      0    0        clock falls; sample next bit; low 13 clocks (0.6 µs)
-334 298      0    1        clock rises; high 401 clocks (18.7 µs)
-... 33 clock periods of 414 clocks (19.3 µs) ...
-347 533      0    0        last sample, capture, back to wait
+0            1    1        LATCH high (P14); clock (J13/K16) is high (idle)
+178          0    1        latch falls (8.3 µs)
+354          0    0        first clock low pulse; T12 sampled on this edge (bit 0)
+367          0    1        clock rises (pad shifts), 13 clocks = 0.6 µs low
+... 33 low pulses in all, every 414 clocks (19.3 µs): 13 low, 401 high ...
+13 602       0    0        33rd sample
+13 615       0    1        clock back high, stays high (idle)
+14 015       0    1        capture into the link-domain registers
+347 351      1    1        next latch
 ```
 
-- Latch ≈ 18 µs (SNES: 12 µs); bit period ≈ 19.3 µs (SNES: 12 µs).
-- Data are sampled at each clock falling edge, 18.7 µs after the rising edge that shifted the
-  pad.
-- The clock idles low between polls; on a real SNES it idles high. The 4021 ignores this
-  because the latch is high when the clock rises with it.
-- If these are the real pad levels, the board's drivers are **non-inverting**. With inverting
-  transistor stages, the pad would see the latch high for 15.5 ms of every 16.2 ms, which is
-  still a valid parallel load, but the clock would then be low-idle with 18.7 µs low pulses.
-  Either way the protocol works.
+- Latch 178 clocks ≈ 8.3 µs (SNES: 12 µs); bit period ≈ 19.3 µs (SNES: 12 µs).
+- **The clock idles high** and pulses low, the same shape as a real SNES; data are sampled
+  as the clock falls, ~18.7 µs after the rising edge that shifted the pad.
+- 33 samples per poll (bit counter loads 32): 16 pad bits plus 17 more.
+- With these levels the board's drivers would be non-inverting; nothing in the waveform now
+  looks inverted, so the earlier "maybe inverting stages" discussion is moot unless hardware
+  says otherwise.
+- Before the first poll (195 ms) P14 and J13/K16 are 0 (gated by `029.011.1.FFB1`).
 
 ## Derivation (how far to trust it)
 
@@ -124,36 +142,29 @@ t (clocks)   P14  J13/K16
    explained by SDRAM, the PIC link, audio or the open-drain group. It feeds a long shift
    register whose capture register is readable over the link. P14, J13 and K16 come from the
    same autonomous FSM, which has no other inputs.
-2. **netlist.py gaps found on the way** (relevant to anyone using it):
-   - **`[TB]_FEEDBACK_SEL`**: in F modes (F_0/F_1/D_F/C_F), with this bit set, the half's F
-     select input (TA/BA in F_0/F_1, the bit-5 select in D_F/C_F) is the ALM's own register
-     (the clocked one of FFT0/FFT1 or FFB0/FFB1), not the routed F pin.
-     - Evidence: the bit only ever appears in F (and RAM) modes. The model makes the
-       power-on counter a sane 22-bit saturating counter, where the tool's reading leaves it
-       stuck at 0. It also turns the "stuck" `020.015` counter from `notes/pic-link.md` into
-       a counter (`(1)+(1)+cin` becomes `(020.015.1.FFB1)+(1)+cin`).
-     - Implemented as a subclass in `~/scratch/padre/fbdesign.py`; `tools/netlist.py` is
-       unchanged.
-   - **LAB CLK2 default**: the tool maps CLK2 to CLKA (CLKIN.0). In `024.015`/`025.015` that
-     would put one shift chain on two different clocks. CLK2 → CLKB (CLKIN.1 = poller clock
-     there) makes it consistent. [guess]
-3. **The cycle model** (`~/scratch/padre/search.py`) hand-codes the FSM equations that
-   `fbdesign.py` prints (own-F convention as in pic-link.md, plus the feedback model), with
-   reload constants evaluated from the LUTs (`reload.txt`).
-   - As decoded, the FSM dies after its first state.
-   - Flipping exactly one LUT (`029.011.9.T`, a D_F-mode half without feedback, the FSM bit
-     "a") gives the periodic poll above. Of the other 31 single/multiple polarity variants,
-     none gives a regular period with one capture per poll and a latch-like pulse.
-   - That flip is an assumption: it is why the sequence and the latch/clock assignment are
-     [guess]/[likely] rather than confirmed.
+2. **netlist.py gaps found on the way**, now fixed in `tools/netlist.py` (evidence in
+   `notes/pic-link.md`, "Tool"):
+   - **Register feedback in F modes**: TF/BF (TA/BA in F_0/F_1, the 6-LUT select in D_F/C_F)
+     are the ALM's own FF?0/FF?1 chosen by `[TB]_FEEDBACK_SEL`, **whatever the select's
+     value**. This note's first version applied it only when the bit is 1; with select 0 the
+     half reads FF?0, which is exactly the D_F-mode FSM bit `029.011.9.T` that needed the
+     flip.
+   - **LAB clock select**: the "CLK2 → CLKB" observation was one instance of mistral's
+     `CLKn_INV`/`CLKn_SEL` names being swapped (`CLKn_INV` selects clkb, `CLKn_SEL CLKB`
+     inverts). It also removes the falling-edge shift clock.
+3. **The cycle model**: the poller's register cone (122 FFs, the only input T12) simulated
+   directly on `netlist.Design` (`~/scratch/netfix/poller.py`). Changed: it no longer needs
+   the flipped LUT (`029.011.9.T`); the hand-coded model in `~/scratch/padre/search.py` and its
+   flip are obsolete. The latch/clock roles follow from the waveform (P14 one pulse per poll,
+   J13/K16 33 pulses with T12 sampled on each) [likely; not checked on hardware].
 
 ## Open questions
 
 - Pins for port 2 data, the D1 lines and IOBit (not configured by spc.cor). They need a probe
   on the board, or a test core that samples candidate unconfigured pins while a pad is held.
   Beware the cart-bus shifter direction pins.
-- Whether the board's latch/clock drivers invert (Q1–Q7 near J5/J6), and so which polarity the
-  pad really sees.
+- Whether the board's latch/clock drivers invert (Q1–Q7 near J5/J6). The decoded waveform
+  is already SNES-shaped (latch high pulse, clock idle high), so non-inverting is likely.
 - Which shift stages end up in which link status byte, and what the six-bit framing check is.
 - The real frequency of `CMUXHG.000.022.3` (clock switchover not decoded).
 - Whether J13 = port 1 clock and K16 = port 2 clock or the reverse (irrelevant while both get
@@ -175,8 +186,9 @@ Only use the pins and I/O settings spc.cor itself uses for the pads:
   lines).
 - **Timing**: copy the stock core rather than real-SNES timing.
   - Wait ≥ 200 ms after configuration before the first poll.
-  - Then once per frame: P14 high ~18 µs; J13/K16 clock with ~19 µs per bit and a short low
-    pulse; sample T12 at each clock falling edge; ≥ 16 bits.
+  - Then once per frame: P14 high ~8.3 µs; J13/K16 idle high, then 33 low pulses of 0.6 µs
+    every 19.3 µs, the first ~8 µs after the latch falls; sample T12 at each clock falling
+    edge; ≥ 16 bits. (Changed: was "P14 high ~18 µs".)
   - Real-SNES timing (12 µs latch, 6 µs/6 µs clock) should also work, since the pad is static
     CMOS.
 - **To settle the open polarity/role questions safely**, make a test core that:

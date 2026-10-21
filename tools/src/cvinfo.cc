@@ -1,6 +1,8 @@
 // Print package/pin facts from mistral's Cyclone V database.
 //   cvinfo pins MODEL       pin name, GPIO block/index, datasheet function, I/O bank
 //   cvinfo pllin MODEL      which pins feed each fPLL's dedicated CLKIN inputs
+//   cvinfo hmc MODEL        hard memory controller bypass: fabric-side HMC port (IOINT*),
+//                           the GPIO port it reaches through the PHY (PHYDDIO*), pin name
 #include "cyclonev.h"
 #include <cstdio>
 #include <cstring>
@@ -10,7 +12,7 @@ using mistral::CycloneV;
 int main(int argc, char **argv)
 {
   if(argc != 3) {
-    fprintf(stderr, "usage: %s pins|pllin MODEL\n", argv[0]);
+    fprintf(stderr, "usage: %s pins|pllin|hmc MODEL\n", argv[0]);
     return 1;
   }
   auto model = CycloneV::get_model(argv[2]);
@@ -36,6 +38,20 @@ int main(int argc, char **argv)
         auto pin = model->pin_find_pnode(other);
         printf("%s <- %s %s %s\n", pn.to_string().c_str(), other.to_string().c_str(),
                pin ? pin->name : "?", pin && pin->function ? pin->function : "");
+      }
+    }
+  } else if(!strcmp(argv[1], "hmc")) {
+    for(const auto &e : model->get_all_p2p()) {
+      for(auto pn : { e.first, e.second }) {
+        auto other = pn == e.first ? e.second : e.first;
+        if(pn.bt() != CycloneV::HMC || other.bt() != CycloneV::GPIO)
+          continue;
+        auto byp = model->hmc_get_bypass(pn);
+        if(!byp)
+          continue;
+        auto pin = model->pin_find_pnode(other);
+        printf("%s %s %s %s\n", byp.to_string().c_str(), other.to_string().c_str(),
+               pn.to_string().c_str(), pin ? pin->name : "?");
       }
     }
   }

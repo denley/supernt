@@ -5,7 +5,8 @@ Usage:
   netlist.py file.bt [options] SEED...
 
 SEED is a pin name (from --pins, default build/f23-pins.txt), a source port
-(LAB.025.017.8:FFT1, GPIO.040.000.3:DATAIN.1, M10K...:DATAAOUT.3) or a sink port
+(LAB.025.017.8:FFT1, GPIO.040.000.3:DATAIN.1, M10K...:DATAAOUT.3), a comb half
+(LAB.029.012.5:T / :B, never the ALM's B input pin) or a sink port
 (LAB.024.016:DATAIN.3). Input pins and source ports seed the forward walk; output
 pins (their DATAOUT/OEIN drivers), sink ports and source ports seed the backward walk.
 
@@ -15,10 +16,15 @@ Options:
   --names F    alias file: lines "SIGNAL NAME" (# comments); SIGNAL as printed
                (025.017.8.FFT1, M028.017.0.B) or as a port
   --pins F     pin list (tools/cvinfo pins output)
+  --hmc F      HMC bypass table (tools/cvinfo hmc output, default build/hmc-bypass.txt)
   --raw        also print LUT masks and modes
 
 Each LAB/MLAB ALM half is a comb node (`XXX.YYY.a.T` / `.B`, `M` prefix for MLABs),
-each used FF a register node (`XXX.YYY.a.FFT0`); pins by name; other blocks by port.
+each used FF a register node (`XXX.YYY.a.FFT0`); pins by name (`PIN.k` for GPIO
+DATAIN.k when the pin has more than one, and always `PIN.3` for DATAIN.3, the IOE input
+register path); other blocks by port. Top-bank pins reached through the hard memory
+controller's bypass ports (HMC.011.045:IOINT*) are followed through to their GPIO ports
+(--hmc table).
 Register lines show D (with sync load/clear), clock, enable and async clear decoded
 from the LAB control settings. As a library, Design.eval_comb/eval_arith/reg_next and
 Sim simulate an extracted cluster (notes/pic-link.md, "Tool").
@@ -28,28 +34,35 @@ Bitstream conventions used (evidence in notes/pic-link.md, "Tool"):
 - LUT: f(s) = ~M[j], j's bit k = ~s_k for a routed pin, 0 for an unrouted one (inputs
   and output inverted, unrouted pins read as 1). MLAB masks are bit-permuted.
 - TMODE/BMODE = "<TA>_<TS>" / "<BA>_<BS>": mistral's ALM schematic muxes D/E0/TF into
-  the top LUT's inputs TA, TS (and C/E1/BF into BA, BS); TF/BF are the half's own F.
+  the top LUT's inputs TA, TS (and C/E1/BF into BA, BS). TF/BF are the register
+  feedback lines, not the F pins: TF = FFT0 (T_FEEDBACK_SEL 0) or FFT1 (1), BF = FFB0 /
+  FFB1 (B_FEEDBACK_SEL), taken at the FF output (before the TDFF/BDFF output muxes) and
+  indexed like a routed input (index bit = ~Q). Printed as the FF's name.
 - Top 5-LUT (low 32 bits): A0 B1 C2 TA3 F0:4; bottom 5-LUT (high 32): A0 B1 D2 BA3 F1:4.
-  TA: E_0 -> E0, F_0 -> F0, D_x -> D. BA: E_1 -> E1, F_1 -> F1, C_x -> C.
+  TA: E_0 -> E0, F_0 -> TF, D_x -> D. BA: E_1 -> E1, F_1 -> BF, C_x -> C.
 - 6-LUT (TMODE D_E/D_F, BMODE C_E/C_F; the defaults): the output picks the top LUT
-  (index bit 5 = 0) or the bottom LUT (bit 5 = 1) by its select, TS = E0 (D_E) or F0
-  (D_F), BS = E1 (C_E) or F1 (C_F); bit 4 = the output's own F (top F0, bottom F1).
+  (index bit 5 = 0) or the bottom LUT (bit 5 = 1) by its select, TS = E0 (D_E) or TF
+  (D_F), BS = E1 (C_E) or BF (C_F); bit 4 = the output's own F pin (top F0, bottom F1).
 - Arithmetic (ARITH_SEL ADDER): per half LUT0 = 16 bits (A B C|D TA|BA), LUT1 = next 16
   (A B C|D F), sum = LUT0 + ~LUT1 + carry-in (yosys MISTRAL_ALUT_ARITH); printed as
   `(LUT0) + (~LUT1) + cin`. Chain: ALM0 T, 0 B, 1 T ... 9 B; into ALM0 from the LAB
-  above if TTO_DIS, into ALM5 from ALM4 if BTO_DIS; else carry-in 0 (assumed).
+  above if TTO_DIS, into ALM5 from ALM4 if BTO_DIS; else carry-in 0 (assumed; Quartus
+  counters that looked stuck under this were F_0 feedback counters, now explained).
 - FF data: FFT0 TPKREG1, FFT1 TPKREG0, FFB0 BPKREG1, FFB1 BPKREG0 set = load from the
   E/F bypass (top E0, or F1 if TEF_SEL F; bottom E1, or F0 if BEF_SEL F), else from the
   half's LUT. Quartus sets these bits on unused FFs too.
 - Clock/aclr groups: FFT0 and FFB1 use TCLK_SEL/TCLR_SEL, FFT1 and FFB0 BCLK_SEL/
   BCLR_SEL. Sync load and sync clear enables are per half (T*: FFT*, B*: FFB*).
-- LAB controls: CLKn -> CLKn_SEL (clka/clkb) -> CLKA_SEL (CLKIN.0 / DATAIN.0),
-  CLKB_SEL (CLKIN.1 / DATAIN.1); CLKn_INV. Enable n = DATAIN.(2,3,0)[n] if ENn_EN
-  (default 1), active low if ENn_NINV (default 1; Quartus clears it for active-high
-  enables). SLOAD = DATAIN.1 (SLOAD_SEL DIN2: .2) ^ SLOAD_INV; SCLR = DATAIN.3
-  (SCLR_SEL DIN1: .1) ^ SCLR_INV; sync clear wins over sync load; enable gates both.
+- LAB clocks: mistral's two per-clock bits are swapped. The bit it calls CLKn_INV picks
+  clkb (set) or clka; CLKn_SEL CLKB inverts. clka = CLKIN.0 or DATAIN.0 (CLKA_SEL DIN0,
+  MLAB GIN2), clkb = CLKIN.1 or DATAIN.1 (CLKB_SEL DIN1, MLAB GIN3).
+- LAB controls: enable n = DATAIN.(2,3,0)[n] if ENn_EN (default 1), active low if
+  ENn_NINV (default 1; Quartus clears it for active-high enables). SLOAD = DATAIN.1
+  (SLOAD_SEL DIN2: .2) ^ SLOAD_INV; SCLR = DATAIN.3 (SCLR_SEL DIN1: .1) ^ SCLR_INV; sync
+  clear wins over sync load; enable gates both.
 - FFT1L/FFB1L carry FFT1/FFB1 (or the comb output if [TB]DFF1L NLUT).
 """
+import os
 import re
 import sys
 from collections import defaultdict
@@ -64,6 +77,8 @@ FF_DFF = {'FFT0': 'TDFF0', 'FFT1': 'TDFF1', 'FFT1L': 'TDFF1L',
 FF_PK = {'FFT0': 'TPKREG1', 'FFT1': 'TPKREG0', 'FFB0': 'BPKREG1', 'FFB1': 'BPKREG0'}
 FF_GRP = {'FFT0': 'T', 'FFB1': 'T', 'FFT1': 'B', 'FFB0': 'B'}
 EN_DIN = {0: 2, 1: 3, 2: 0}
+DEFAULT_HMC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'build',
+                           'hmc-bypass.txt')
 
 
 # ------------------------------------------------------------------ boolean minimisation
@@ -123,13 +138,16 @@ def sop(names, ones):
 
 # ------------------------------------------------------------------ design database
 class Design:
-    # Alternative readings of the F modes, kept for experiments (both False = the
-    # reading that gives no combinational self-loops in spc.cor and a sane link FSM).
-    TF_CROSS = False      # F_0/F_1: TA/BA = the other half's F (True) or own F
-    TS_F_CROSS = False    # D_F/C_F: select = the other half's F (True) or own F
+    # Switches for experiments; the defaults are the readings in the module docstring.
+    FEEDBACK = True       # TF/BF = register feedback (False: the F pins, the old reading)
+    TF_CROSS = False      # FEEDBACK=False only: F_0/F_1 TA/BA = the other half's F pin
+    TS_F_CROSS = False    # FEEDBACK=False only: D_F/C_F select = the other half's F pin
+    CLK_SWAP = True       # CLKn_INV picks clkb, CLKn_SEL CLKB inverts (False: mistral's names)
 
-    def __init__(self, path, pinfile=None, names=None):
+    def __init__(self, path, pinfile=None, names=None, hmc=None):
         self.drv, self.fan = trace.load(path)
+        self.hmc_in = {}                  # HMC bypass input port -> GPIO DATAIN port
+        self.hmc_out = set()              # HMC bypass output ports linked to a GPIO
         self.alm = defaultdict(dict)      # 'LAB.025.017.8' -> {key: val}
         self.lab = defaultdict(dict)      # 'LAB.025.017' -> {key: val}
         self.pinof = {}                   # GPIO port -> pin name (from comments)
@@ -155,14 +173,20 @@ class Design:
                 body = line[2:].split(' ; ')
                 port, val = body[0].split()
                 self.inv[port] = val
-                # HMC bypass links (top bank pins), as in pinmap.py
+                # HMC bypass links also appear as comments on HMC inverter lines
                 if line.startswith('i HMC') and len(body) == 3:
                     gpio = body[2].split()[-1]
                     if gpio.startswith('GPIO.'):
-                        if gpio.split(':')[1].startswith(('DATAOUT', 'OEIN')):
-                            self.drv.setdefault(gpio, port)
-                        else:
-                            self.fan[gpio].append(port)
+                        self.link_hmc(port, gpio, routed_only=False)
+        # Top-bank pins: HMC bypass ports (IOINT*) <-> GPIO ports, for every route
+        # (most bypass routes have no inverter line, so the comments above miss them)
+        if hmc is None and os.path.exists(DEFAULT_HMC):
+            hmc = DEFAULT_HMC
+        if hmc:
+            for line in open(hmc):
+                f = line.split()
+                if len(f) >= 2 and f[1].startswith('GPIO.'):
+                    self.link_hmc(f[0], f[1])
         self.pins = {}
         if pinfile:
             for line in open(pinfile):
@@ -187,15 +211,32 @@ class Design:
             else:
                 self.masks[a] = 0
 
+    def link_hmc(self, port, gpio, routed_only=True):
+        """Connect an HMC bypass port to its GPIO port (by default only if the HMC port
+        is routed; an unrouted one becomes a leaf, i.e. a constant)."""
+        if gpio.split(':')[1].startswith(('DATAOUT', 'OEIN')):
+            if (port in self.drv or not routed_only) and gpio not in self.drv:
+                self.drv[gpio] = port
+                self.hmc_out.add(port)
+        elif port in self.fan and port not in self.hmc_in:
+            self.fan[gpio].append(port)
+            self.hmc_in[port] = gpio
+
     # -- routing
     def source(self, port):
-        return trace.back(self.drv, port)[-1]
+        src = trace.back(self.drv, port)[-1]
+        while src in self.hmc_out and src in self.drv:   # GPIO <- HMC bypass <- fabric
+            src = trace.back(self.drv, src)[-1]
+        return self.hmc_in.get(src, src)  # fabric <- HMC bypass <- GPIO DATAIN
 
     def sinks(self, port):
-        return trace.fwd(self.fan, port)
+        out = []
+        for p in trace.fwd(self.fan, port):
+            out += trace.fwd(self.fan, p) if p in self.hmc_in else [p]
+        return sorted(out)
 
     def routed(self, port):
-        return port in self.drv
+        return port in self.drv or (self.FEEDBACK and port.endswith((':TF', ':BF')))
 
     # -- naming
     def short(self, blk):
@@ -210,7 +251,8 @@ class Design:
             blk = sig.split(':')[0]
             pin = self.pinof.get(sig) or next((p for p, g in self.pins.items() if g == blk), None)
             if pin:
-                return pin + ('.' + sig[-1] if self.other_datain_used(sig) else '')
+                suffix = self.other_datain_used(sig) or sig.endswith('.3')
+                return pin + ('.' + sig[-1] if suffix else '')
         if sig.startswith('const'):
             return sig
         m = re.match(r'((?:M?LAB)\.\d+\.\d+\.\d+):(\w+)$', sig)
@@ -221,8 +263,7 @@ class Design:
 
     def other_datain_used(self, sig):
         base = sig[:-1]
-        other = base + ('0' if sig.endswith('1') else '1')
-        return other in self.fan
+        return any(base + str(k) in self.fan for k in range(4) if str(k) != sig[-1])
 
     def canon(self, src):
         """Canonical signal for a source port: comb halves as ALM.T/.B, regs as ALM:FFxx."""
@@ -238,7 +279,13 @@ class Design:
             return f'{alm}:FF{half}1'
         return f'{alm}:{port}'
 
+    def feedback(self, alm, half):
+        """Register on the half's feedback line (TF/BF): FF?0 or FF?1 by [TB]_FEEDBACK_SEL."""
+        return f'{alm}:FF{half}{self.alm[alm].get(half + "_FEEDBACK_SEL", "0")}'
+
     def sig_of_pin(self, alm, pin):
+        if pin in ('TF', 'BF') and self.FEEDBACK:
+            return self.feedback(alm, pin[0])
         port = f'{alm}:{pin}'
         if port not in self.drv:
             return None
@@ -252,8 +299,11 @@ class Design:
         tm, bm = s.get('TMODE', 'D_E'), s.get('BMODE', 'C_E')
         if tm == 'RAM':
             return None
-        tf_t = 'F1' if self.TF_CROSS else 'F0'
-        tf_b = 'F0' if self.TF_CROSS else 'F1'
+        if self.FEEDBACK:
+            tf_t, tf_b = 'TF', 'BF'
+        else:
+            tf_t = 'F1' if self.TF_CROSS else 'F0'
+            tf_b = 'F0' if self.TF_CROSS else 'F1'
         ta = {'E_0': 'E0', 'F_0': tf_t, 'D_E': 'D', 'D_F': 'D'}.get(tm, 'D')
         ba = {'E_1': 'E1', 'F_1': tf_b, 'C_E': 'C', 'C_F': 'C'}.get(bm, 'C')
         if s.get('ARITH_SEL') == 'ADDER':
@@ -271,7 +321,7 @@ class Design:
             if mode.endswith('E'):
                 e = own_e
             else:
-                e = (tf_t if half == 'T' else tf_b) if self.TS_F_CROSS else own_f
+                e = (tf_t if half == 'T' else tf_b) if (self.TS_F_CROSS or self.FEEDBACK) else own_f
             pins = sorted({'A', 'B', 'C', 'D', ta, ba, e, f})
 
             def idx(vals, e=e, f=f, ta=ta, ba=ba):   # vals: pin -> index bit value (0/1)
@@ -439,17 +489,25 @@ class Design:
             r['clk'] = 'none'
         else:
             n = int(clk[-1])
-            ab = L.get(f'CLK{n}_SEL', 'CLKA')
+            if self.CLK_SWAP:
+                ab = 'CLKB' if L.get(f'CLK{n}_INV') == '1' else 'CLKA'
+                cinv = L.get(f'CLK{n}_SEL') == 'CLKB'
+            else:
+                ab = L.get(f'CLK{n}_SEL', 'CLKA')
+                cinv = L.get(f'CLK{n}_INV') == '1'
             if ab == 'CLKA':
                 srcsel = L.get('CLKA_SEL', 'CIN0')
-                port = {'CIN0': f'{lab}:CLKIN.0', 'DIN0': f'{lab}:DATAIN.0'}.get(srcsel, srcsel)
+                port = {'CIN0': f'{lab}:CLKIN.0', 'DIN0': f'{lab}:DATAIN.0',
+                        'GIN2': f'{lab}:DATAIN.0'}.get(srcsel, srcsel)
             else:
                 srcsel = L.get('CLKB_SEL', 'CIN1')
-                port = {'CIN1': f'{lab}:CLKIN.1', 'DIN1': f'{lab}:DATAIN.1'}.get(srcsel, srcsel)
+                port = {'CIN1': f'{lab}:CLKIN.1', 'DIN1': f'{lab}:DATAIN.1',
+                        'GIN3': f'{lab}:DATAIN.1'}.get(srcsel, srcsel)
             src = self.canon(self.source(port)) if port in self.drv else port
             if 'DATAIN' in port and src != port:
                 r['ins'].append(src)
-            r['clk'] = ('~' if L.get(f'CLK{n}_INV') == '1' else '') + self.name(src) + f' [CLK{n}]'
+            r['clk_sig'], r['clk_inv'] = src, cinv
+            r['clk'] = ('~' if cinv else '') + self.name(src) + f' [CLK{n}]'
             if L.get(f'EN{n}_EN', '1') == '1':
                 e = self.lab_ctl(lab, EN_DIN[n])
                 inv = L.get(f'EN{n}_NINV', '1') == '1'
@@ -563,6 +621,8 @@ class Design:
         out = set()
         for p in ports:
             out |= set(self.sinks(p))
+        if m and self.FEEDBACK and self.feedback(alm, ff[2]) == sig:
+            out.add(f'{alm}:{ff[2]}F')    # the half's feedback line (pseudo pin TF/BF)
         return out
 
     def ff_used(self, alm, ff):
@@ -573,7 +633,7 @@ class Design:
     def sink_targets(self, port):
         """Map a sink port to the canonical signals it affects (or itself if a leaf)."""
         m = re.match(r'((?:M?LAB)\.\d+\.\d+\.\d+):(\w+)$', port)
-        if m and m[2] in ALM_PINS:
+        if m and m[2] in ALM_PINS + ('TF', 'BF'):
             alm, pin = m[1], m[2]
             s = self.alm[alm]
             out = set()
@@ -661,7 +721,7 @@ def resolve_seed(D, seed):
     if seed in D.pins:
         g = D.pins[seed]
         fwd, back = [], []
-        for k in range(2):
+        for k in range(4):                # .3 = IOE input register path
             p = f'{g}:DATAIN.{k}'
             if p in D.fan:
                 fwd.append(p)
@@ -672,7 +732,8 @@ def resolve_seed(D, seed):
                     back.append(D.canon(D.source(p)))
         return fwd, back
     if ':' in seed:
-        if seed in D.drv and not re.search(r':FF[TB]', seed):   # sink port
+        # ALM:T / ALM:B are comb halves (not the routed A/B/... input pins)
+        if seed in D.drv and not re.search(r':(FF[TB]|T$|B$)', seed):   # sink port
             return [], [D.canon(D.source(seed))]
         c = D.canon(seed)
         return [c], [c]
@@ -681,7 +742,7 @@ def resolve_seed(D, seed):
 
 def main():
     args = sys.argv[1:]
-    opts = {'--back': 3, '--fwd': 3, '--names': None, '--pins': None}
+    opts = {'--back': 3, '--fwd': 3, '--names': None, '--pins': None, '--hmc': None}
     raw = False
     seeds = []
     path = args.pop(0)
@@ -694,7 +755,7 @@ def main():
         else:
             seeds.append(a)
     pinfile = opts['--pins'] or __file__.rsplit('/', 2)[0] + '/build/f23-pins.txt'
-    D = Design(path, pinfile, opts['--names'])
+    D = Design(path, pinfile, opts['--names'], opts['--hmc'])
     nodes, leaves_in, leaves_out = {}, set(), defaultdict(set)
 
     def expand_back(sig, depth):

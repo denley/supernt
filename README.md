@@ -21,7 +21,8 @@ into `firmware/` (gitignored) and everything else is derived from it locally.
     (LUT equations, FF clock/enable/load/clear) around seed pins/ports, plus a cycle
     simulator for the extracted logic (conventions and evidence in `notes/pic-link.md`).
   - `m10k.py` – dump block RAM contents (layout in `notes/spc-core.md`).
-  - `cvinfo` – package pins and PLL clock-input pins from mistral's database.
+  - `cvinfo` – package pins, PLL clock-input pins and the HMC bypass port ↔ GPIO table
+    (`build/hmc-bypass.txt`, used by `pinmap.py`/`netlist.py`) from mistral's database.
   - `rbf2cor` – turn a nextpnr-built `.rbf` into a `.cor` with spc's options and I/O standards.
   - `pllpatch.py` – give our designs fPLL clocks by copying spc's PLL configurations
     (`hw/<name>/pll.cfg`, `notes/pll.md`).

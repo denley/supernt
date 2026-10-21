@@ -1,8 +1,9 @@
 # SDRAM interface of spc.cor (JB7.2)
 
 Reverse-engineered from `build/spc.bt` only (mistral decompile of Analogue's `spc.cor`), by gate-level
-extraction (`tools/netlist.py`, with two decode fixes, see "Method") and cycle simulation of the
-extracted controller. Oct 2026. Confidence tags: **[confirmed]** = read directly from the bitstream
+extraction (`tools/netlist.py`; the two decode fixes in "Method" are now part of the tool) and cycle
+simulation of the extracted controller. Oct 2026. Init and refresh re-simulated from power-up with
+the fixed tool (nothing forced); changes marked "Changed". Confidence tags: **[confirmed]** = read directly from the bitstream
 or forced by the simulated command sequence; **[likely]** = the only reading consistent with several
 independent checks; **[guess]** = plausible, not checked.
 
@@ -121,14 +122,20 @@ Init (after configuration, FFs at 0):
 
 1. 1 cycle of all-zero command pins (= MRS with A = 0) before the first update. Harmless, since the
    SDRAM isn't initialised yet.
-2. NOP (CS# 0, A10 1, other address 0) for 2^20 cycles (a 20-bit counter whose LSB is a toggle FF)
-   + ≈1040 cycles of wait counters (6-bit × 4-bit) = **≈9.06 ms**.
-3. PRE ALL; 1 deselect; REF; 8 deselect; REF; 8 deselect; MRS 0x037 (BA = 00, A10 = 0); 9
-   deselect; PRE ALL; NOP; REF; idle (deselect).
-   REF→REF = 9 cycles (77.7 ns ≥ tRC), MRS→next 10 cycles.
+2. NOP (CS# 0, A10 1, other address 0) until the first PRE ALL at cycle **2^20 + 2^11 = 1 050 624
+   = 9.068 ms** (a 20-bit counter whose LSB is a toggle FF, then wait counters). Changed: was
+   "2^20 + ≈1040 = ≈9.06 ms", from a run that forced the init counter's release and estimated
+   the rest; the whole controller now runs from all-zero FFs to the end of init.
+3. PRE ALL; 1 deselect; REF; 8 deselect; REF; 8 deselect; MRS 0x037 (BA = 00, A10 = 0); then
+   deselect until the first periodic refresh (PRE ALL; NOP; REF), which from power-up comes
+   **558 cycles** after the MRS (the refresh timer free-runs from configuration and requests at
+   cycle ≡ 2 mod 2400). REF→REF = 9 cycles (77.7 ns ≥ tRC), REF→MRS 9 cycles. Changed: was
+   "MRS; 9 deselect; PRE ALL; NOP; REF" – that PRE/NOP/REF is the periodic refresh, whose phase
+   came out differently in the forced run.
 
 Periodic refresh: request every **2400 cycles (20.71 µs)** from a free-running counter
-(`MLAB.023.005`), served when idle: PRE ALL, NOP, REF (PRE→REF 2 cycles = 17.3 ns, slightly under
+(`MLAB.023.005`; all 20 intervals in a 1.1 M-cycle run from power-up are exactly 2400), served
+when idle: PRE ALL, NOP, REF (PRE→REF 2 cycles = 17.3 ns, slightly under
 tRP 18 ns for -6, but every burst already closes its bank), then ≥8 cycles before the next command.
 4096 refreshes take 84.8 ms, outside the 64 ms spec.
 
@@ -139,13 +146,18 @@ Write request (client S): PRE ALL → ACT → WRITE after 3 cycles with **OE and
 cycle** (write latency 0) → 512 data cycles → BST (held 3 cycles) → NOP → PRE ALL (5 cycles after
 the BST) → second row. DQM is never toggled by logic.
 
+Both bursts re-checked with the fixed tool from a post-init snapshot (client V: one request input
+set; client S: two inputs of its toggle handshake set): same command sequences and spacings.
+
 Timing in C1 cycles (8.631 ns): tRP 3, tRCD 3, CL 3, tRAS ≈ 522 cycles (4.5 µs), tRC for refresh 9.
 
 ## Top bank / x16 AS4C8M16SA
 
-**pinmap.py misses these**: top-bank pins driven through HMC bypass ports whose route line has no
-matching `i HMC …` inverter line (`r X HMC.011.045:IOINT…DOUT.n ; PIN`). Following those route
-lines, fabric drives many top-bank pins, not just defaults:
+Top-bank pins driven through HMC bypass ports whose route line has no matching `i HMC …` inverter
+line (`r X HMC.011.045:IOINT…DOUT.n ; PIN`) were missed by `pinmap.py`. Changed: fixed,
+`build/spc-pinmap.txt` now lists all of the pins below (15 more fabric-driven top-bank pins; it
+takes the bypass table from `tools/cvinfo hmc`). Following those routes, fabric drives many
+top-bank pins, not just defaults:
 
 - **Second memory controller, 148.5 MHz** (FPLL.054.000 C5 via CMUXVG.021.000.3; LABs x=19–21,
   y=20–24), with its clock out on **H8** (DDIO like AB11, IOE `CLKOUT.0` ← CMUXVG.021.000.2 =
@@ -173,8 +185,12 @@ lines, fabric drives many top-bank pins, not just defaults:
 - Seeds: the 18 outputs + DQ OE/CE. `tools/netlist.py` cone back to C1 FFs in the region; other
   domains become inputs. A compiled cycle simulator on top of `netlist.Design` (`~/scratch/sdramre/`,
   throwaway: `fsim.py`, `run.py`, `c2.py`) runs it from all-zero FFs. Client requests were found
-  by poking each foreign-domain input.
-- **Two decode fixes to netlist.py were needed**; without them the FSM deadlocks:
+  by poking each foreign-domain input. Re-run with the fixed `tools/netlist.py`
+  (`~/scratch/netfix/sdram.py`, throwaway): the full C1 cone is 195 FFs whose only inputs are 16
+  client-request FFs (10 on 148.5 MHz client V, 6 on client S's clock); with those at 0 it runs
+  init + refresh from power-up with nothing forced.
+- **Two decode fixes to netlist.py were needed** (now in `tools/netlist.py`, evidence in
+  `notes/pic-link.md` "Tool"); without them the FSM deadlocks:
   1. LAB clock select: the bit mistral calls `CLKn_INV` selects clkb (`CLKIN.1`), and
      `CLKn_SEL CLKB` is the real inversion. Evidence: in spc, 89 LABs route only `CLKIN.1` and set
      `CLKn_INV` on every clock they use; LABs routing only `CLKIN.0` set it only on unused clocks.
@@ -184,8 +200,8 @@ lines, fabric drives many top-bank pins, not just defaults:
      F inputs. Evidence: the init counter's LSB (`LAB.014.007.0`, `D_F`, `T_FEEDBACK_SEL 1`) becomes
      a toggle FF and the counter reaches terminal count at exactly 2^20; with the F-input reading it
      sticks and the FSM never leaves init. Every state FF of this FSM is fed by a `D_F` LUT.
-- pinmap.py also misses HMC-bypass ports without inverter lines (above), and netlist.py's pin seeds
-  ignore GPIO `DATAIN.3` (registered input path).
+- pinmap.py also missed HMC-bypass ports without inverter lines (above), and netlist.py's pin seeds
+  ignored GPIO `DATAIN.3` (registered input path). Both fixed.
 
 ## Open questions
 
