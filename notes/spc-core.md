@@ -73,10 +73,21 @@ So the board has two clock inputs, **W16 and H16**, both consistent with 74.25 M
   - Write data comes straight from the B ports of x2 M10Ks (`011.004`–`007`, `022.004`–`007`,
     4 KB each – write buffers), OEs from fabric FFs, inputs captured with clock enables.
   (An earlier note read these as the PIC32 link; the SDRAM reading fits the photos better.)
-- **Bottom bank 4A: classic 8-bit bus** (now the best PIC32-link candidate; or the cartridge data
-  bus behind the SN74LVC8T245 level shifters) AB21 AA22 AB22 W22 Y22 W21 Y21 V21 with one shared OE FF
-  (`LAB.021.017.0:FFT0`), ~12 outputs (AB12 AB13 AA13 AA14 AA15 AB15 AB17 AB18 AA17 AA18 P14) and
-  inputs T12 AB20 AA20 AA19 U22 U21.
+- **Bottom bank 4A: the PIC32 link (strong candidate).** 8-bit bidirectional data AB21 AA22 AB22
+  W22 Y22 W21 Y21 V21, output data from FFs in `LAB.031.013`, one shared output-enable FF
+  (`LAB.021.017.0:FFT0`). Inputs **AB20, AA20, AA19, U21** each go through one synchroniser FF into
+  the same small state machine (`LAB.025.017`, next to the OE FF), and one of them becomes a LAB
+  control signal (clock enable). That is an FPGA-as-slave parallel bus: the master drives
+  strobes (read/write/select/address-latch) and the FPGA enables its data drivers on reads – the
+  shape of a PIC32 PMP (parallel master port) in master mode with the FPGA as the peripheral.
+  Which input is which strobe is not known yet.
+  - The other 4A/3B outputs (AB12 AB13 AA13 AA14 AA15 AB15 AB17 AB18 AA17 AA18) come from the
+    same LAB cluster (x 14–18, y 3–5) that drives the 2A outputs W2 … N1, i.e. SDRAM
+    address/control for the x8 pair.
+- **Other inputs**: H11 and G12 (top bank) each feed two places in a symmetric way
+  (`LAB.025.019`, `LAB.040.011`) – candidates for the two controller-port data lines. T12 and U22
+  each feed one FF (buttons? controller IO lines?). Candidate controller latch/clock outputs: G13,
+  H15, F10, P14. All unconfirmed.
 - **Open drain**: B11 plus A8 B10 A10 A9 A12 B12 C16 (via HMC bypass) are all driven from the
   same FF (`MLAB.023.040.2:FFT0`); G6 from another. Purpose unknown. The HDMI transmitter is an
   AD9889B (I2C-configured); nothing in this core looks like an I2C master with an init table, so
@@ -109,8 +120,10 @@ Solved against the Pocket SNES core, whose ROM init files are in its source (`fi
 ## Open questions
 
 - How the SPC data reaches the core (over the PIC32 link, or left in SDRAM by the firmware).
-- Which of the 2A/3B/4A buses is the PIC32 link, the cartridge and the controllers; the LED (the
-  changelog mentions the SPC core sets the LED colour).
+- The PIC32 link protocol (4A bus): which strobe is which, register map, how a file is streamed.
+  Needs either a functional netlist of this core or a logic analyser on the board.
+- Controller ports, cartridge bus pins and the LED (the changelog mentions the SPC core sets the
+  LED colour).
 - Whether the core configures the HDMI transmitter (B11 is the only I2C-like pin) or the firmware
   leaves it configured.
 - Board revision: a 2023 production run replaced end-of-life parts (`notes/hardware-research.md`);
