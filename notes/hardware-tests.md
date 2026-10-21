@@ -18,8 +18,8 @@ pulling it.
   Delete it from the card once the update is done.
 - Installed `01-spc-colortest` as `spc.cor`.
 - The card had no `.spc` files. `tools/mkspc.py` makes `SPC/Super Nt test chord.spc`: a steady
-  A major chord (440/554/659 Hz square waves; checked with libgme). Not on the card yet; the
-  next `tools/sdcore setup` copies it.
+  A major chord (440/554/659 Hz square waves; checked with libgme). Copied to
+  the card 21 Oct; `tools/sdcore setup` copies it too.
 
 ## Order
 
