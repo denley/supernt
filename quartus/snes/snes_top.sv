@@ -17,7 +17,10 @@ module top #(
     parameter SYNC_ORDER = 3,
     parameter OUT_W      = 768,     // picture width on the 1280-pixel line (896 = 4:3)
     parameter LOCK       = 1,       // align output frames to the SNES (snes_video.sv)
-    parameter [15:0] RESET_CYCLES = 16'hffff  // core reset after PLL lock (clk_sys cycles)
+    parameter [15:0] RESET_CYCLES = 16'hffff, // core reset after PLL lock (clk_sys cycles)
+    // Serial audio framing the AD9889B expects (notes/audio.md): 0 = I2S, 1 = left-justified.
+    // Not confirmed yet (quartus/hwtest plays both).
+    parameter AUD_FRAMING = 0
 ) (
     input  wire       clk,      // W16, 74.25 MHz
     output wire       pclk,     // M22, pixel clock to the AD9889B
@@ -26,7 +29,12 @@ module top #(
     output wire       s2,       // M18 HSYNC /
     output reg  [7:0] ch1,      // red:   K21 K22 M20 L22 T17 T18 R15 T22 (bit 7..0)
     output reg  [7:0] ch2,      // green: N20 P22 R22 R21 P19 P18 N16 N19
-    output reg  [7:0] ch3       // blue:  T20 T15 T19 R16 M21 N21 P17 R17
+    output reg  [7:0] ch3,      // blue:  T20 T15 T19 R16 M21 N21 P17 R17
+    // serial audio to the AD9889B (notes/audio.md)
+    output wire       aud_mclk, // L17, 12.288 MHz
+    output wire       aud_bclk, // L19, 3.072 MHz
+    output wire       aud_lrclk,// K17, 48 kHz
+    output wire       aud_sdata // L18
 );
     // ---------------------------------------------------------------- clocks and reset
     wire clk_vid = clk;         // 720p pixel clock straight from the 74.25 MHz board clock
@@ -53,10 +61,11 @@ module top #(
     // ---------------------------------------------------------------- SNES
     wire [7:0] r, g, b;
     wire       dotclk, hde, vde, high_res, v224;
+    wire [15:0] audio_l /* verilator public_flat_rd */, audio_r;
     snes_core #(.ROM_HEX(ROM_HEX)) snes (
         .clk_sys(clk_sys), .reset(core_reset),
         .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde), .high_res(high_res),
-        .v224(v224), .audio_l(), .audio_r()
+        .v224(v224), .audio_l(audio_l), .audio_r(audio_r)
     );
 
     // ---------------------------------------------------------------- video
@@ -94,4 +103,12 @@ module top #(
         .datain_h(1'b0), .datain_l(1'b1), .outclock(clk_vid), .dataout(pclk),
         .aclr(1'b0), .aset(1'b0), .oe(1'b1), .oe_out(), .outclocken(1'b1), .sclr(1'b0), .sset(1'b0)
     );
+
+    // ---------------------------------------------------------------- audio
+    // DSP output (32 kHz, clk_sys domain) -> 48 kHz serial audio, sample-and-hold.
+    wire mclk;
+    audio_pll apll (.refclk(clk), .outclk_0(mclk), .locked());
+    i2s_out #(.FRAMING(AUD_FRAMING)) aout (
+        .clk_src(clk_sys), .l(audio_l), .r(audio_r),
+        .mclk(mclk), .mclk_pin(aud_mclk), .bclk(aud_bclk), .lrclk(aud_lrclk), .sdata(aud_sdata));
 endmodule

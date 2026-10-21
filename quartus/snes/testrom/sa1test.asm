@@ -395,9 +395,88 @@ Reset:
     lda.b #$A5
     sta !AllDone
 
+    jsr SpcUpload               ; then a steady A major chord from the S-DSP
+
 Forever:
     wai
     bra Forever
+
+; -----------------------------------------------------------------------------
+; SpcUpload: A8 XY16.  Sends SpcBlock to S-SMP RAM $0200 through the IPL ROM's
+; $2140-$2143 protocol and starts it at $0210 (after the SA-1 tests, so their
+; timing is unchanged).  The S-SMP program loads the S-DSP registers from its
+; table and keys on voices 0-2: square waves at 440, 554 and 659 Hz (the same
+; chord as tools/mkspc.py), so a working audio path is audible.
+; -----------------------------------------------------------------------------
+SpcUpload:
+-   lda $2140
+    cmp.b #$AA
+    bne -
+-   lda $2141
+    cmp.b #$BB
+    bne -
+    stz $2142                   ; destination $0200
+    lda.b #$02
+    sta $2143
+    lda.b #$01
+    sta $2141                   ; non-zero: transfer
+    lda.b #$CC
+    sta $2140
+-   cmp $2140
+    bne -
+    ldx.w #$0000
+.byte:
+    lda SpcBlock,x
+    sta $2141
+    txa
+    sta $2140
+-   cmp $2140
+    bne -
+    inx
+    cpx.w #SpcBlockEnd-SpcBlock
+    bne .byte
+    lda.b #$10                  ; run from $0210
+    sta $2142
+    lda.b #$02
+    sta $2143
+    stz $2141                   ; zero: jump
+    txa
+    inc a                       ; last index + 2
+    sta $2140
+-   cmp $2140
+    bne -
+    rts
+
+; S-SMP image for $0200 (hand-assembled SPC700).
+SpcBlock:
+    db $04,$02,$04,$02          ; $0200 directory: sample 0 start/loop = $0204
+    db $B3,$77,$77,$77,$77,$88,$88,$88,$88 ; $0204 BRR: one looping block, square
+    db $00,$00,$00              ; $020D pad
+    db $CD,$00                  ; $0210 mov x,#$00
+    db $F5,$30,$02              ; $0212 loop: mov a,$0230+x
+    db $C4,$F2                  ;       mov $F2,a      (DSP register)
+    db $3D                      ;       inc x
+    db $F5,$30,$02              ;       mov a,$0230+x
+    db $C4,$F3                  ;       mov $F3,a      (value)
+    db $3D                      ;       inc x
+    db $C8,SpcTableEnd-SpcTable ;       cmp x,#len
+    db $D0,$F0                  ;       bne loop
+    db $8F,$4C,$F2              ; $0222 mov $F2,#$4C   (KON)
+    db $8F,$07,$F3              ;       mov $F3,#$07   (voices 0-2)
+    db $2F,$FE                  ; $0228 bra *
+    db $00,$00,$00,$00,$00,$00  ; $022A pad
+SpcTable:                       ; $0230 (DSP register, value)
+    db $6C,$20                  ; FLG: unmute, echo writes off
+    db $5D,$02                  ; DIR = $0200
+    db $0C,$30,$1C,$30          ; main volume
+    db $2C,$00,$3C,$00          ; echo volume 0
+    db $5C,$00,$3D,$00,$4D,$00,$2D,$00 ; KOF, NON, EON, PMON off
+    db $00,$20,$01,$20,$02,$85,$03,$03,$04,$00,$05,$00,$07,$7F ; v0 440 Hz
+    db $10,$20,$11,$20,$12,$6F,$13,$04,$14,$00,$15,$00,$17,$7F ; v1 554 Hz
+    db $20,$20,$21,$20,$22,$46,$23,$05,$24,$00,$25,$00,$27,$7F ; v2 659 Hz
+SpcTableEnd:
+SpcBlockEnd:
+assert SpcTable-SpcBlock == $30, "S-SMP table must sit at $0230"
 
 ; -----------------------------------------------------------------------------
 ; CmpBlock: A8 XY16.  (PtrA),y vs (PtrB),y for y < Y.  Returns A = 1 / 2.

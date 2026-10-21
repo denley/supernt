@@ -20,3 +20,11 @@ set_false_path -to [get_ports {aud_bclk aud_lrclk aud_sdata aud_mclk}]
 # for the whole /RD low time (>= 100 ns), so no output timing applies.
 set_false_path -from [get_ports {link_a[*] link_nrd link_nwr link_d[*]}]
 set_false_path -to [get_ports {link_d[*]}]
+# Controller port: microsecond-scale signals.
+set_false_path -to [get_ports {pad_p14 pad_j13 pad_k16}]
+set_false_path -from [get_ports {pad_t12}]
+# SDRAM test: the read-capture point is chosen on hardware (sdram_test.sv tries eight), so the
+# SDRAM interface is not timed here; commands and write data change half a clock before the
+# chips sample them (inverted clock on AB11).
+set_false_path -to [get_ports {sd_cs_n sd_ras_n sd_cas_n sd_we_n sd_a[*] sd_ba[*] sd_dq[*] sd_cke sd_dqm[*] sd_clk}]
+set_false_path -from [get_ports {sd_dq[*]}]

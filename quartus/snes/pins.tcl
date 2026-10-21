@@ -58,3 +58,11 @@ set_location_assignment PIN_P17 -to ch3[1]
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to ch3[1]
 set_location_assignment PIN_R17 -to ch3[0]
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to ch3[0]
+set_location_assignment PIN_L17 -to aud_mclk
+set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to aud_mclk
+set_location_assignment PIN_L19 -to aud_bclk
+set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to aud_bclk
+set_location_assignment PIN_K17 -to aud_lrclk
+set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to aud_lrclk
+set_location_assignment PIN_L18 -to aud_sdata
+set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to aud_sdata

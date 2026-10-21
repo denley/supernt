@@ -13,6 +13,12 @@ module snes_pll (
     assign locked   = 1'b1;
 endmodule
 
+// Audio PLL: the board clock stands in (the I2S logic just runs faster in simulation).
+module audio_pll (input wire refclk, output wire outclk_0, output wire locked);
+    assign outclk_0 = refclk;
+    assign locked = 1'b1;
+endmodule
+
 // DDIO output: datain_h while outclock is high, datain_l while it is low (registered on the
 // respective edges in the real cell; the difference doesn't matter here).
 module altddio_out #(

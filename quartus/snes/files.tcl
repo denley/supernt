@@ -21,6 +21,8 @@ set_global_assignment -name VERILOG_FILE $U/main.v
 
 # Ours (quartus/snes).
 set_global_assignment -name VERILOG_FILE snes_pll.v
+set_global_assignment -name VERILOG_FILE audio_pll.v
+set_global_assignment -name SYSTEMVERILOG_FILE ../common/i2s_out.sv
 set_global_assignment -name SYSTEMVERILOG_FILE snes_core.sv
 set_global_assignment -name SYSTEMVERILOG_FILE snes_video.sv
 set_global_assignment -name SYSTEMVERILOG_FILE snes_top.sv

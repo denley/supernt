@@ -131,7 +131,8 @@ quartus/%.rbf: FORCE
 	  || { tail -20 build.log; exit 1; }
 	@grep -q 'Timing requirements not met' $(dir $@)build.log && echo 'WARNING: timing not met' || true
 
-out/q-%.cor: quartus/$$*/$$*.rbf
+out/q-%.cor: quartus/$$*/$$*.rbf tools/checkpins.py
+	python3 -I tools/checkpins.py quartus/$*/$*.pin quartus/$*/pins.tcl
 	mkdir -p out
 	python3 -I tools/bitrev.py $< $@
 
@@ -154,7 +155,7 @@ sim-hwtest: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
 	mkdir -p build/sim
 	iverilog -g2012 -o build/sim/hwtest.vvp -s tb quartus/hwtest/sim/tb.sv quartus/hwtest/sim/models.v \
 	  quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/i2s_test.sv \
-	  quartus/common/link_logger.sv
+	  quartus/common/link_logger.sv quartus/common/pad_test.sv quartus/common/sdram_test.sv
 	cd build/sim && vvp -n hwtest.vvp > hwtest.log && tail -3 hwtest.log
 	python3 -I quartus/hwtest/sim/check.py build/sim
 
@@ -199,7 +200,7 @@ SNES_VHDL_SIM := quartus/snes/sim/bram_sim.vhd quartus/snes/sim/mlab_sim.vhd \
 SNES_GHDL := ghdl
 SNES_GA   := --std=08 -fsynopsys -frelaxed -fexplicit -Wno-shared -Wno-hide -Wno-binding
 SNES_SV   := quartus/snes/sim/tb.sv quartus/snes/snes_top.sv quartus/snes/snes_core.sv \
-  quartus/snes/snes_video.sv quartus/snes/sim/sim_models.v $(SNES_UP)/main.v
+  quartus/snes/snes_video.sv quartus/common/i2s_out.sv quartus/snes/sim/sim_models.v $(SNES_UP)/main.v
 
 # Vendor VHDL copied to the work dir with the GHDL fixes of quartus/snes/sim/ghdl.patch.
 $(SNES_SIM)/upstream/.stamp: quartus/snes/sim/ghdl.patch

@@ -42,6 +42,7 @@ int main(int argc, char **argv) {
     std::vector<unsigned char> img(W * H * 3, 0);
     int frame = -1, line = -1, x = 0, lines_total = 0, conflicts = 0;
     long long sys_cycles = 0;
+    int audio_peak = 0;   // max |audio_l| in the current output frame (S-DSP output)
     bool ok_lock = true, ok_ring = true, ok_pix = false, ok_wram = false;
     int prev_vs = 0, prev_hs = 0, prev_de = 0;
     auto &wram = r->tb__DOT__dut__DOT__snes__DOT__wram__DOT__mem;
@@ -59,7 +60,8 @@ int main(int argc, char **argv) {
                    frame, lines_total, line + 1, conflicts, sys_cycles, wram[0xfe], wram[0xff],
                    wram[0xfc] | wram[0xfd] << 8);
             for (int k = 0; k < 8; k++) printf(" %d", wram[0x100 + k]);
-            printf("\n");
+            printf(" audio peak %d\n", audio_peak);
+            audio_peak = 0;
             // Frames 0-1 come before/at the alignment jump. From frame 2 on: standard 750-line
             // frames, no ring-buffer conflicts. Last frame: test results and the picture.
             if (frame >= 2) {
@@ -120,7 +122,12 @@ int main(int argc, char **argv) {
             tb->clk_sys = !tb->clk_sys;
             tsys += hsys;
             tb->eval();
-            if (tb->clk_sys) sys_cycles++;
+            if (tb->clk_sys) {
+                sys_cycles++;
+                int a = (int16_t)r->tb__DOT__dut__DOT__audio_l;
+                if (a < 0) a = -a;
+                if (a > audio_peak) audio_peak = a;
+            }
         }
     }
     tb->final();

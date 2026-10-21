@@ -2,6 +2,8 @@
 // Super Nt hardware test core: one core that exercises every interface we know, with the
 // results on a text screen (layout: screen.txt, compiled by tools/mkscreen.py). Sections:
 //   audio  - i2s_test.sv: alternating I2S / left-justified test tone (notes/audio.md)
+//   pads   - pad_test.sv: port 1 poll in four latch/clock/polarity configurations
+//   sdram  - sdram_test.sv: x8 SDRAM pair memory test at 8 read-capture points
 //   link   - link_logger.sv: the PIC32 port as spc.cor implements it, logging every
 //            transaction as compressed runs with CRC-32 (notes/pic-link.md)
 // Pages cycle automatically: 0 overview (10 s), 1-7 link tables (6 s each). Status word map:
@@ -31,7 +33,23 @@ module top #(
     input  wire [2:0] link_a,   // AB20 AA20 AA19
     input  wire       link_nrd, // U21
     input  wire       link_nwr, // U22
-    inout  wire [7:0] link_d    // AB21 AB22 AA22 Y21 Y22 W21 W22 V21 (bit 7..0)
+    inout  wire [7:0] link_d,   // AB21 AB22 AA22 Y21 Y22 W21 W22 V21 (bit 7..0)
+    // controller port 1 (notes/controllers.md)
+    output wire       pad_p14,  // P14, likely LATCH
+    output wire       pad_j13,  // J13 } same signal, likely CLOCK (ports 1/2)
+    output wire       pad_k16,  // K16 }
+    input  wire       pad_t12,  // T12, port 1 data
+    // x8 SDRAM pair (notes/sdram.md)
+    output wire       sd_clk,   // AB11
+    output wire       sd_cs_n,  // AB17
+    output wire       sd_ras_n, // AA17
+    output wire       sd_cas_n, // AB18
+    output wire       sd_we_n,  // AA18
+    output wire [11:0] sd_a,    // A0-A9 AB13 AA13 AB12 AA12 U2 U1 W2 AA2 AA1 N1, A10 AA14, A11 N2
+    output wire [1:0] sd_ba,    // AA15 AB15 (order unknown)
+    inout  wire [15:0] sd_dq,   // 7:0 chip A (2A) D3 E2 L2 L1 G2 G1 C2 C1, 15:8 chip B (3B)
+    output wire       sd_cke,   // AB10, constant in spc.cor (CKE?)
+    inout  wire [7:0] sd_dqm    // Y3 W9 W8 Y9 Y10 R11 R10 Y11, open-drain constants in spc.cor
 );
     // ---------------------------------------------------------------- status words
     wire [31:0] st [0:23];
@@ -70,7 +88,9 @@ module top #(
     reg [9:0]  pframes = 10'd0;
     always @(posedge clk) begin
         vy_d <= vy;
-        if (vy == 10'd0 && vy_d == 10'd749) begin
+        // count frames and turn pages at the last active line (blank on this screen), before
+        // textmode samples the status words at the start of vertical blanking
+        if (vy == 10'd719 && vy_d == 10'd718) begin
             frames <= frames + 32'd1;
             if (pframes == (page == 3'd0 ? PAGE0_FRAMES : PAGE_FRAMES) - 10'd1) begin
                 pframes <= 10'd0;
@@ -120,7 +140,12 @@ module top #(
         .d_out(ld_out), .d_oe(ld_oe), .sel(lsel), .idx(lidx), .entry(lent), .entry_valid(lvalid),
         .n_wr_total(l_nwr), .n_rd_total(l_nrd), .n_other(l_noth), .n_all(l_all), .n_big(l_big),
         .n_rdlog(l_rdl), .addr(l_addr), .usec(l_us), .last_act(l_last));
-    assign rowstat   = {96'd0, 22'd0, lidx, lent};
+    wire [255:0] link_row = {96'd0, 22'd0, lidx, lent};
+    assign rowstat = page != 3'd0       ? link_row :
+                     row_next == 5'd15  ? {192'd0, s_edz, s_ed0} :
+                     row_next == 5'd16  ? {128'd0, s_e3, s_e2, s_e1, s_e0} :
+                     row_next == 5'd17  ? {128'd0, s_e7, s_e6, s_e5, s_e4} :
+                     row_next == 5'd18  ? {160'd0, 16'd0, s_fe, 16'd0, s_fg, s_fb} : 256'd0;
     assign row_blank = page != 3'd0 && row_next >= 5'd2 && !lvalid;
     assign st[4]  = l_nwr;
     assign st[5]  = l_nrd;
@@ -134,7 +159,38 @@ module top #(
     assign st[14] = {22'd0, lbase};
     assign st[15] = {21'd0, lsel == 2'd1 ? l_big : lsel == 2'd2 ? l_rdl : l_all};
 
-    generate for (gi = 16; gi < 24; gi = gi + 1) begin : g_unused
-        assign st[gi] = 32'd0;
-    end endgenerate
+    // ---------------------------------------------------------------- pads
+    wire        pclkp;
+    wire [31:0] praw0, praw1, praw2, praw3;
+    wire        pt12;
+    wire [15:0] ppolls;
+    pad_test pads (
+        .clk(clk), .p14(pad_p14), .j13k16(pclkp), .t12(pad_t12),
+        .raw0(praw0), .raw1(praw1), .raw2(praw2), .raw3(praw3), .t12_now(pt12), .polls(ppolls));
+    assign pad_j13 = pclkp;
+    assign pad_k16 = pclkp;
+    assign st[16] = praw0;
+    assign st[17] = praw1;
+    assign st[18] = praw2;
+    assign st[19] = praw3;
+    assign st[20] = {31'd0, pt12};
+    assign st[21] = {16'd0, ppolls};
+
+    // ---------------------------------------------------------------- SDRAM
+    wire [15:0] sdq_out;
+    wire        sdq_oe, s_dqm_low;
+    wire [31:0] s_e0, s_e1, s_e2, s_e3, s_e4, s_e5, s_e6, s_e7, s_ed0, s_edz, s_fb;
+    wire [15:0] s_passes, s_fg, s_fe;
+    assign sd_dq  = sdq_oe ? sdq_out : 16'hzzzz;
+    assign sd_cke = 1'b1;
+    assign sd_dqm = s_dqm_low ? 8'h00 : 8'hzz;     // open-drain: low or released
+    sdram_test sdram (
+        .clk(clk), .sd_clk(sd_clk), .sd_cs_n(sd_cs_n), .sd_ras_n(sd_ras_n), .sd_cas_n(sd_cas_n),
+        .sd_we_n(sd_we_n), .sd_a(sd_a), .sd_ba(sd_ba), .sd_dq_in(sd_dq), .sd_dq_out(sdq_out),
+        .sd_dq_oe(sdq_oe), .dqm_low(s_dqm_low),
+        .err0(s_e0), .err1(s_e1), .err2(s_e2), .err3(s_e3), .err4(s_e4), .err5(s_e5),
+        .err6(s_e6), .err7(s_e7), .passes(s_passes), .err_dqm0(s_ed0), .err_dqmz(s_edz),
+        .first_bad(s_fb), .first_got(s_fg), .first_exp(s_fe));
+    assign st[22] = {16'd0, s_passes};
+    assign st[23] = {31'd0, s_dqm_low};
 endmodule

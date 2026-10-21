@@ -5,6 +5,8 @@ set_global_assignment -name SDC_FILE hwtest.sdc
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/textmode.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/i2s_test.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/link_logger.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../common/pad_test.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../common/sdram_test.sv
 set_global_assignment -name VERILOG_FILE audio_pll.v
 set_global_assignment -name SYSTEMVERILOG_FILE hwtest_top.sv
 source ../common/supernt.tcl

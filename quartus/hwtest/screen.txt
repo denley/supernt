@@ -1,21 +1,24 @@
 [y]SUPER NT HARDWARE TEST[w]  (supernt hwtest 1)   page {13.1}              frame {0.8}
-
 [y]AUDIO[w]  now playing framing {1.1:y}   (0 = I2S, 440 Hz   1 = left-justified, 880 Hz)
        switches every 4 s   time {2.2} s   12.288 MHz PLL locked {3.1}
        Film a few cycles WITH SOUND: the clean pitch is the right framing.
-
+[y]PADS[w]   pad in port 1, press buttons. T12 now {20.1}  polls {21.4}
+  cfg 0  latch P14      clock J13/K16            {16.8:y}
+  cfg 1  latch P14      clock J13/K16 inverted   {17.8:y}
+  cfg 2  latch J13/K16  clock P14                {18.8:y}
+  cfg 3  latch J13/K16  clock P14 inverted       {19.8:y}
+  Right one: FFFF0000 with nothing held; bit 0 B, 1 Y, 2 Select, 3 Start,
+  4 Up, 5 Down, 6 Left, 7 Right, 8 A, 9 X, A L, B R.
 [y]LINK[w]   data writes {4.8}   reads {5.8}   other writes {6.8}
        runs logged {7.3}   big runs {8.3}   read runs {9.3}   (max 400 hex each)
        address now {10.8}   time {11.8} us   last strobe {12.8} us
-
-[y]PADS[w]   not in this build
-[y]SDRAM[w]  not in this build
-
-Pages change by themselves: 0 this overview (10 s), then 1-7 (6 s each):
-1-2 write runs of 32+ bytes, 3 read runs, 4-7 every run in order.
-Please photograph every page (or film a full minute).
-
-K: 0 write run, 1 read run (D0 = value we returned), 2 A=3 latch, 3 A=6/7 write
+       K: 0 write run, 1 read run (D0 = value we returned), 2 A=3 latch, 3 A=6/7
+[y]SDRAM[w]  32 MB  pass {22.4}  DQM pins low {23.1:y}  best errors: low {24.8} off {25.8}
+  errors per capture: r3 {24.8} f2.5 {25.8} r4 {26.8} f3.5 {27.8}
+  one should stay 0: r5 {24.8} f4.5 {25.8} r6 {26.8} f5.5 {27.8}
+  first f4.5 miss at {24.6} got {25.4} expected {26.4}
+Pages: 0 overview 10 s, then 6 s each: 1-2 write runs 32+ B, 3 reads, 4-7 all
+Film a full minute WITH SOUND for each .spc file (power-cycle between files).
 %%page
 [y]LINK: WRITE RUNS OF 32+ BYTES[w]  page {13.1}  from {14.3}  of {15.3}
   #  K  ADDRESS   BYTES   D0  CRC-32    T (ms)
