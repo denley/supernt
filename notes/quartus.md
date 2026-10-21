@@ -26,3 +26,12 @@ Agreement, version 25.1"; copy in `~/scratch/quartus-eula/25.1/license.txt`).
    §2.2.8.
 
 Using Quartus to build cores for the Super Nt's Cyclone V is what the licence grants (§2.1).
+
+## Pin safety
+
+`make out/q-<name>.cor` runs `tools/checkpins.py` on Quartus' `.pin` report and refuses to make
+the `.cor` if any user I/O is not on the pin `pins.tcl` gives it (Quartus, like nextpnr, places
+unassigned I/Os anywhere, which on the board could drive a random net). The open flow does the
+same before nextpnr with `tools/checkqsf.py` (every top port bit needs a `.qsf` location).
+Added 21 Oct 2026 after a hwtest build briefly lacked its SDRAM pin block (caught, never built
+into a `.cor`).

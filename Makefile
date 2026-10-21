@@ -94,7 +94,8 @@ build/hw/%.json: $$(wildcard hw/$$*/*.v)
 	mkdir -p build/hw
 	$(YOSYS) -q -l build/hw/$*-yosys.log -p 'read_verilog $(wildcard hw/$*/*.v); synth_intel_alm -top top -nodsp; write_json $@'
 
-build/hw/%.rbf: build/hw/%.json hw/$$*/$$*.qsf $(NEXTPNR)
+build/hw/%.rbf: build/hw/%.json hw/$$*/$$*.qsf $(NEXTPNR) tools/checkqsf.py
+	python3 -I tools/checkqsf.py $< hw/$*/$*.qsf
 	$(NEXTPNR) --device $(MODEL) --json $< --qsf hw/$*/$*.qsf --rbf $@ -l build/hw/$*-nextpnr.log -q \
 	  $(shell cat hw/$*/nextpnr.args 2>/dev/null) \
 	  $(if $(wildcard hw/$*/pll.cfg),--write build/hw/$*-routed.json)
