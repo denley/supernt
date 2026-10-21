@@ -11,6 +11,9 @@ The FPGA is a 5CEBA4F23C8N (F23, 484 pins), read from board photos (`notes/hardw
 
 ## Clocks (fPLL settings, reference 74.25 MHz)
 
+Full, corrected decode (counters, fractional values, all outputs) is in `notes/pll.md`; the
+table below is the first pass. FPLL.054.000's N is the default (2), so it makes 148.5 MHz.
+
 | PLL | VCO | Outputs | Reading |
 |---|---|---|---|
 | FPLL.000.000 | 601.36 MHz (M=8.0992 fractional) | C0 21.4773 MHz | NTSC SNES master clock |

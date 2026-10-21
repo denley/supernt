@@ -53,6 +53,9 @@ tools/fpllpins: tools/src/fpllpins.cc tools/mistral-cv
 tools/cvinfo: tools/src/cvinfo.cc tools/mistral-cv
 	g++ $(CXXFLAGS) $< $(LIBS) -o $@
 
+tools/pllinfo: tools/src/pllinfo.cc tools/mistral-cv
+	g++ $(CXXFLAGS) $< $(LIBS) -o $@
+
 $(NEXTPNR):
 	git clone https://github.com/Ravenslofty/mistral.git $(MISTRAL_NEXTPNR) 2>/dev/null || true
 	git -C $(MISTRAL_NEXTPNR) checkout -q $(MISTRAL_NPR_REV)
@@ -93,9 +96,21 @@ build/hw/%.json: $$(wildcard hw/$$*/*.v)
 
 build/hw/%.rbf: build/hw/%.json hw/$$*/$$*.qsf $(NEXTPNR)
 	$(NEXTPNR) --device $(MODEL) --json $< --qsf hw/$*/$*.qsf --rbf $@ -l build/hw/$*-nextpnr.log -q \
-	  $(shell cat hw/$*/nextpnr.args 2>/dev/null)
+	  $(shell cat hw/$*/nextpnr.args 2>/dev/null) \
+	  $(if $(wildcard hw/$*/pll.cfg),--write build/hw/$*-routed.json)
 
-out/%.cor: build/hw/%.rbf build/spc.rbf tools/rbf2cor
+# PLL clocks (notes/pll.md): with hw/<name>/pll.cfg, the placeholder clock buffers it names are
+# rewired to fPLL outputs after routing, and the result is checked (decodes cleanly, differs from
+# nextpnr's bitstream only in the patch, requested frequencies decoded back).
+build/hw/%-pll.rbf: build/hw/%.rbf hw/$$*/pll.cfg build/spc.bt tools/pllpatch.py tools/pllinfo tools/mistral-patch
+	python3 -I tools/pllpatch.py patch hw/$*/pll.cfg $< build/hw/$*-routed.json build/spc.bt build/hw/$*-pll.bt
+	tools/mistral-patch patch $< build/hw/$*-pll.bt $@
+	python3 -I tools/pllpatch.py check hw/$*/pll.cfg $< $@ build/hw/$*-pll.bt
+
+build/plls-%.txt: build/%.bt tools/pllpatch.py tools/pllinfo
+	python3 -I tools/pllpatch.py decode $< > $@
+
+out/%.cor: $$(if $$(wildcard hw/$$*/pll.cfg),build/hw/$$*-pll.rbf,build/hw/$$*.rbf) build/spc.rbf tools/rbf2cor
 	mkdir -p out
 	tools/rbf2cor $(MODEL) $< build/spc.rbf $@
 

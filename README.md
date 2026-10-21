@@ -21,6 +21,8 @@ into `firmware/` (gitignored) and everything else is derived from it locally.
   - `m10k.py` – dump block RAM contents (layout in `notes/spc-core.md`).
   - `cvinfo` – package pins and PLL clock-input pins from mistral's database.
   - `rbf2cor` – turn a nextpnr-built `.rbf` into a `.cor` with spc's options and I/O standards.
+  - `pllpatch.py` – give our designs fPLL clocks by copying spc's PLL configurations
+    (`hw/<name>/pll.cfg`, `notes/pll.md`).
 - `patches/*.bt` – edits applied to `spc.cor` to make `out/spc-<name>.cor`.
 - `hw/<name>/` – our own designs, built with yosys + nextpnr-mistral into `out/<name>.cor`
   (`notes/toolchain.md`; no Quartus needed).
@@ -74,6 +76,9 @@ levels on existing outputs.
   photo.** A blank screen for the whole ~50 s cycle means the AD9889B isn't left configured for
   us (or the clock/pixel-clock guess is wrong). It doesn't read the controller, so power-cycle to
   get back to the menu.
+- `out/plltest.cor` – checks our PLL patching (`notes/pll.md`): same 720p screen and sync cycling
+  as vtest, counts 21.477 MHz PLL cycles per frame. Big block solid white = PLL correct, stripes
+  = wrong frequency, black = no PLL clock. White-on-black only, so the colour order doesn't matter.
 - `out/blinky.cor` – our first core built from scratch (open-source flow): a counter on the W16
   clock driving one HDMI colour pin. Nothing visible is expected; it only shows whether the console
   accepts a non-Quartus bitstream (no hang/error).
