@@ -78,8 +78,11 @@ build/spc-pins.txt: build/spc.bt tools/pins.py
 build/f23-pins.txt: tools/cvinfo
 	tools/cvinfo pins $(MODEL) > $@
 
-build/spc-pinmap.txt: build/spc.bt build/f23-pins.txt tools/pinmap.py tools/trace.py
-	python3 -I tools/pinmap.py $< build/f23-pins.txt > $@
+build/hmc-bypass.txt: tools/cvinfo
+	tools/cvinfo hmc $(MODEL) > $@
+
+build/spc-pinmap.txt: build/spc.bt build/f23-pins.txt build/hmc-bypass.txt tools/pinmap.py tools/trace.py
+	python3 -I tools/pinmap.py $< build/f23-pins.txt --hmc build/hmc-bypass.txt > $@
 
 out/spc-%.cor: patches/%.bt build/spc.rbf tools/mistral-patch tools/mkcor.py
 	mkdir -p out
@@ -237,10 +240,69 @@ sim-snes: $(SNES_SIM)/obj/Vtb build/snes/sa1test.hex
 	  cat build/sim/snes.log; \
 	  for f in build/sim/snes-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
 
+# SNES + SA-1 core with the cartridge ROM in SDRAM (quartus/snes_sdram, notes/snes-sdram.md):
+# the boot ROM it copies into SDRAM is the same test ROM.
+quartus/snes_sdram/snes_sdram.rbf: build/snes/sa1test.hex
+
+# Unit simulations (iverilog): the SDRAM controller against the timed model
+# (h:expect-fail:D_CLK:D_OUT): the default capture point and a neighbouring one (pass), two wrong
+# ones (must fail), and the default with the clock phases snes_sdram is built with
+# (sdram_cfg.tcl: relative to the capture clock, SDRAM clock 1.67 ns early, commands 0.63 ns
+# late); the PIC32 link loader.
+SDROM_SIM := quartus/snes_sdram/sim/tb_sdram_rom.sv quartus/snes_sdram/sim/sdram_model.v \
+  quartus/snes_sdram/sim/ddio_model.v quartus/common/sdram_rom.sv
+sim-sdram-rom: $(SDROM_SIM)
+	mkdir -p build/sim
+	@set -e; for c in 7:0:3.5:3.5 8:0:3.5:3.5 6:1:3.5:3.5 9:1:3.5:3.5 7:0:1.83:4.13; do \
+	  set -- $$(echo $$c | tr : ' '); h=$$1; x=$$2; d=$$3; o=$$4; n=$$h-$$d; \
+	  iverilog -g2012 -s tb_sdram_rom -P tb_sdram_rom.CAPTURE_HALF=$$h -P tb_sdram_rom.EXPECT_FAIL=$$x \
+	    -P tb_sdram_rom.D_CLK=$$d -P tb_sdram_rom.D_OUT=$$o -o build/sim/sdram_rom_$$n.vvp $(SDROM_SIM); \
+	  vvp -n build/sim/sdram_rom_$$n.vvp > build/sim/sdram_rom_$$n.log; \
+	  grep -E '^ *[0-9]+ (init|wrote|phase)|^model' build/sim/sdram_rom_$$n.log | sed 's/^ *[0-9]* /  /'; \
+	  grep -E '^(PASS|FAIL)' build/sim/sdram_rom_$$n.log; grep -q '^PASS' build/sim/sdram_rom_$$n.log; done
+
+LINK_LD_SIM := quartus/snes_sdram/sim/tb_link_loader.sv quartus/snes_sdram/sim/sdram_model.v \
+  quartus/snes_sdram/sim/ddio_model.v quartus/common/sdram_rom.sv quartus/common/link_loader.sv
+sim-link-loader: $(LINK_LD_SIM)
+	mkdir -p build/sim
+	iverilog -g2012 -s tb_link_loader -o build/sim/link_loader.vvp $(LINK_LD_SIM)
+	vvp -n build/sim/link_loader.vvp > build/sim/link_loader.log; tail -3 build/sim/link_loader.log | head -2
+	grep -q '^PASS' build/sim/link_loader.log
+
+# Simulation of the whole quartus/snes_sdram top (notes/snes-sdram.md, "Simulation"), like
+# sim-snes (same GHDL netlists) with the cycle-based SDRAM model: boot copy into SDRAM, then the
+# test ROM from SDRAM. Work files in SNES_SDRAM_SIM; frames build/sim/snes_sdram-NN.png, report
+# build/sim/snes_sdram.log (last line PASS/FAIL). SNES_SDRAM_CAP builds with another
+# CAPTURE_HALF (separate object directory).
+SNES_SDRAM_SIM ?= $(HOME)/scratch/sdramrom/sim
+SNES_SDRAM_CAP ?= 7
+SNES_SDRAM_OBJ := $(SNES_SDRAM_SIM)/obj$(SNES_SDRAM_CAP)
+SNES_SDRAM_SV := quartus/snes_sdram/sim/tb.sv quartus/snes_sdram/snes_sdram_top.sv \
+  quartus/snes_sdram/snes_sdram_core.sv quartus/snes/snes_video.sv quartus/common/i2s_out.sv \
+  quartus/common/sdram_rom.sv quartus/snes_sdram/sim/sim_models.v quartus/snes_sdram/sim/ddio_model.v \
+  quartus/snes_sdram/sim/sdram_cyc.v $(SNES_UP)/main.v
+
+$(SNES_SDRAM_OBJ)/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_SDRAM_SV) quartus/snes_sdram/sim/tb_snes_sdram.cpp
+	mkdir -p $(SNES_SDRAM_SIM)
+	verilator --cc --exe --build -j 4 -O2 --top-module tb +1364-2005ext+v -Wno-fatal -Wno-lint -Wno-style \
+	  -Wno-MULTIDRIVEN -Wno-UNOPTFLAT -Wno-COMBDLY --x-assign fast --x-initial fast \
+	  -CFLAGS -O1 -Mdir $(SNES_SDRAM_OBJ) -o Vtb \
+	  -GROM_HEX='"$(CURDIR)/build/snes/sa1test.hex"' -GCAPTURE_HALF=$(SNES_SDRAM_CAP) \
+	  $(SNES_SDRAM_SV) $(SNES_SIM)/vlog/SNES.v $(SNES_SIM)/vlog/SA1Map.v \
+	  $(SNES_SIM)/vlog/DSP_LHRomMap.v $(abspath quartus/snes_sdram/sim/tb_snes_sdram.cpp) \
+	  > $(SNES_SDRAM_OBJ).log 2>&1 || { tail -30 $(SNES_SDRAM_OBJ).log; exit 1; }
+
+sim-snes-sdram: $(SNES_SDRAM_OBJ)/Vtb build/snes/sa1test.hex
+	mkdir -p build/sim
+	rm -f build/sim/snes_sdram-*.p?m
+	$(SNES_SDRAM_OBJ)/Vtb $(SNES_FRAMES) build/sim/snes_sdram- > build/sim/snes_sdram.log; s=$$?; \
+	  cat build/sim/snes_sdram.log; \
+	  for f in build/sim/snes_sdram-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
+
 FORCE:
 
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE sim-snes sim-hwtest
+.PHONY: all clean FORCE sim-snes sim-hwtest sim-sdram-rom sim-snes-sdram sim-link-loader
 .SECONDARY:

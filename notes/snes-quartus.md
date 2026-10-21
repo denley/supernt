@@ -295,9 +295,9 @@ Not verified / assumptions:
 
 ## Next steps
 
-- **SDRAM**: trace the x16 AS4C8M16SA's pins (top bank, clock H8) from spc.cor, then put the ROM
-  there with `sdram.sv` (needs the 85.9 MHz clock, a second PLL output). That frees 8+ M10K and
-  lifts the 8 KB ROM limit; WRAM/ARAM can stay in M10K.
+- **SDRAM**: done in `quartus/snes_sdram` (`notes/snes-sdram.md`): ROM in the x8 pair with our
+  own controller (`quartus/common/sdram_rom.sv`) on an 85.77 MHz second PLL output; lifts the
+  8 KB ROM limit; WRAM/ARAM stay in M10K.
 - **PIC32 loading**: work out the bank 4A link protocol (`out/q-buslog.cor`), then feed
   `ioctl_*`-style writes into SDRAM and set ROM_TYPE/ROM_MASK/RAM_MASK from the header (the
   Pocket's `rom_parser.sv`). BW-RAM saves need the reverse path.

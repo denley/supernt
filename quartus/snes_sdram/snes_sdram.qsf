@@ -1,0 +1,37 @@
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CEBA4F23C8
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name SDC_FILE snes_sdram.sdc
+source files.tcl
+source ../common/supernt.tcl
+source pins.tcl
+source sdram_params.tcl
+# Settings from agg23's Pocket build of the same core (projects/snes_pocket.qsf).
+set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
+set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
+set_global_assignment -name SAFE_STATE_MACHINE ON
+set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
+set_global_assignment -name SEED 1
+# clk_sys -> clk_mem paths must be longer than the clk_mem lag (snes_sdram.sdc): let the fitter
+# pad every hold-critical path, not only I/O ones.
+set_global_assignment -name OPTIMIZE_HOLD_TIMING "ALL PATHS"
+# Video outputs come straight from I/O-cell registers (pixel clock: DDIO in snes_sdram_top.sv).
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch1[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch2[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch3[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s0
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s1
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s2
+# SDRAM: commands, address and write data from I/O-cell registers (same clock-to-pin delay as
+# the DDIO clock on AB11), read data into I/O-cell input registers where possible.
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_cs_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_ras_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_cas_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_we_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_a[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_ba[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_dq[*]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to sd_dq[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to sd_dq[*]
+
+set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"

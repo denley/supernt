@@ -80,6 +80,11 @@ above it (SA-1 alive). Sync order and colour pins are the ones vtest confirmed, 
 should be steady. **Take a photo.** Simulated (`make sim-snes`), not yet tried on the console; it
 drives only the video pins. Power-cycle to get back to the menu.
 
+`out/q-snes_sdram.cor` (Quartus only, `notes/snes-sdram.md`) is the same core with the cartridge
+ROM in the x8 SDRAM pair: it copies the test ROM into SDRAM at start-up and runs from there. Same
+expected picture as `q-snes`. Simulated, not yet run on the console; set the read-capture point
+from the hwtest SDRAM result first (`quartus/snes_sdram/sdram_cfg.tcl`).
+
 Console results so far (`notes/hardware-tests.md`): `spc-colortest` loads and runs; `vtest`
 gives a picture (sync order 3, colour map in `notes/spc-core.md`).
 
