@@ -1,0 +1,11 @@
+# nextpnr-mistral only acts on set_location_assignment (set_instance_assignment is parsed and
+# stored but ignored). Pin names are F23 (484-pin) package names.
+#
+# clk: W16 is the most likely 74.25 MHz reference input (notes/toolchain.md, "Reference clock
+#      pin"): the SPC core's two bottom fPLLs take their reference from it, and it configures W16
+#      as a plain input. Unconfirmed; H16 is the other candidate (feeds the two top fPLLs).
+# led: N20 is one of the HDMI colour pins the SPC core already drives as an output
+#      (notes/spc-core.md), so driving it is electrically safe. It won't show anything visible
+#      without the HDMI transmitter being set up; this design checks the flow, not the board.
+set_location_assignment PIN_W16 -to clk
+set_location_assignment PIN_N20 -to led

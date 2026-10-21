@@ -8,3 +8,6 @@ tools/rbfcycle
 out/
 __pycache__/
 tools/mistral-cv
+tools/rbf2cor
+tools/fpllpins
+tools/cvinfo
