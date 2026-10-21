@@ -20,7 +20,7 @@ pulling it.
   release (github.com/analoguejb/Analogue-Super-Nt-JB). Check: Tools has "Reload Save RAM"
   (new in 7.2). The `.bin` was deleted from the card after the update.
 - Installed `01-spc-colortest` as `spc.cor`, then `05-vtest`, then `07-buslog` rebuilt with
-  the fixed sync order (21 Oct evening).
+  the fixed sync order, then `09-q-snes` rebuilt with the confirmed sync/colour map (21 Oct evening).
 - The card had no `.spc` files. `tools/mkspc.py` makes `SPC/Super Nt test chord.spc`: a steady
   A major chord (440/554/659 Hz square waves; checked with libgme). Copied to
   the card 21 Oct; `tools/sdcore setup` copies it too.
@@ -51,3 +51,6 @@ pulling it.
   reversed relative to the proposal (mapping now in `notes/spc-core.md`). White block white.
   Photo: `photos/vtest-2026-10-21.jpg`. So: our bitstreams configure the FPGA, the 74.25 MHz W16
   clock is right, and the AD9889B is left configured for 720p RGB with separate syncs.
+- 21 Oct 2026, `07-buslog` (fixed sync order): **works**; 3 photos, one per page, log full
+  (1024 events). Transcription in `notes/buslog-2026-10-21/`. Repeating 5-state strobe cycle,
+  one state carrying varying data; long stretches look like polling for a reply.
