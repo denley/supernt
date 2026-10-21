@@ -38,4 +38,7 @@ pulling it.
 
 ## Results
 
-(none yet)
+- 21 Oct 2026, JB7.2, `01-spc-colortest`: **loads and runs.** The SPC player UI showed and the
+  test chord played. So the loader accepts a modified `spc.cor` (no hash or signature check, at
+  least for a patch this small), and mkcor's frame handling is good on hardware. (A first "black
+  screen" report was the file not being started properly.) Colour scrambling not yet confirmed.
