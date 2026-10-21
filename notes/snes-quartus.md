@@ -100,6 +100,15 @@ output, new data on read-during-write, powers up as zero) on `clk_sys`, matching
 
 - `clk` (W16, 74.25 MHz board clock): the video side, directly (global clock), and the PLL
   reference.
+- **Since 21 Oct 2026 `clk_sys` is 21.44196 MHz, not 21.477272**: 74.25 × 357366/1237500, so an
+  NTSC SNES frame (357366 master clocks) lasts exactly one standard 720p frame (60.000 Hz). The
+  SNES runs 0.164% slow (2.8 cents flat). Why: the projector on the test console drops the
+  signal when the frame length varies (the earlier 748/749-line lock), and the alternative,
+  a 74.372282 MHz video clock (74.25 × 656250/655171) for 60.0988 Hz output, can't be made: the
+  fPLL's fractional multiplier must lie in 0.05–0.95, and with N = 1 (PFD ≥ 50 MHz) every
+  usable VCO gives a fraction of 0.015–0.03 (Quartus rejects it; the IP generator falls back to
+  74.25). A cascade from the SNES PLL's VCO would work but wasn't tried. The text below
+  describes the original 21.477272 MHz setup; the PLL counters are in the fit report.
 - `clk_sys` = 21.477272 MHz from one fractional fPLL (`snes_pll.v`, `altera_pll` instantiated
   directly with parameters, mode "normal"). The fitter report gives N = 1, M = 8 +
   425945992/2^32, VCO 601.363616 MHz, C = 28: the same frequency as the Pocket core's PLL and
@@ -132,22 +141,27 @@ output, new data on read-during-write, powers up as zero) on `clk_sys`, matching
   columns map to `OUT_W` output pixels by nearest neighbour (default 768: 3 output pixels per
   normal SNES pixel, 1.5 per hi-res pixel), centred; `OUT_W = 896` gives a 4:3 picture with
   alternating 3/4-pixel widths. Everything outside the picture is black.
-- **60.0988 Hz vs 60 Hz: frame lock.** An SNES frame (262 lines × 1364 master clocks) lasts
-  16.639 ms, a 750-line 720p frame 16.667 ms, i.e. ~1.26 output lines more. Once per SNES frame
-  the capture side sends an event at a fixed point: at the start of the first visible line
-  (`VDE` rise) in 239-line mode, about 8.2 SNES lines earlier in 224-line mode (counted against
-  the previous frame's length). At the end of the output line in which the event arrives, the
-  output line counter jumps to line 746, in the vertical back porch. Locked, each output frame
-  has 748 or 749 lines (60.10 Hz), the jump always lands in the back porch, and the output
-  starts reading each SNES line 2.3–3.7 output lines after the capture side finished writing it.
+- **Frame lock.** At the real SNES clock an SNES frame (262 lines × 1364 master clocks) lasts
+  16.639 ms, a 750-line 720p frame 16.667 ms. With `clk_sys` = 21.44196 MHz both last exactly
+  16.667 ms, so the output keeps standard totals at 60.000 Hz. Once per SNES frame the capture side sends an event at a fixed point: at the
+  start of the first visible line (`VDE` rise) in 239-line mode, about 8.2 SNES lines earlier
+  in 224-line mode (counted against the previous frame's length). If it arrives outside output
+  lines 744–746 (`LOCK_LINE` − 1 ± `LOCK_WIN`), the output line counter jumps to line 746 (in the
+  vertical back porch) at the end of that line: once at startup, then only after a 224/239 mode
+  change or if fractional-PLL rounding ever drifts the clocks apart by more than a line. Aligned,
+  the output starts reading each SNES line 2.3–3.7 (± 1) output lines after the capture side
+  finished writing it.
   - Why a 16-line ring: during the visible part the SNES delivers a line every 63.5 µs, but 3
     output lines take 66.7 µs, so the writer pulls ahead by ~11 lines over a frame; it catches
     up during vertical blanking. Its lead stays below 16 lines, and the simulation counts any
     cycle where the output reads the slot being written (none, see Simulation).
-  - What a TV sees: 720p with a 748/749-line vertical total, 60.10 Hz. Most HDMI sinks accept
-    that (it is how many retro scalers run "frame-locked"); if one doesn't, set `LOCK = 0`:
-    exactly 750 lines/60.000 Hz, but the picture then rolls/tears (the ring holds only 16
-    lines, so the free-running output shows mismatched lines; a full frame buffer needs SDRAM).
+  - What a TV sees: standard 720p60 (74.25 MHz, 1650 × 750, 60.000 Hz). The first design kept
+    the real SNES clock and jumped every frame (748/749-line frames, 60.10 Hz); Denley's
+    projector showed the free-running 60.000 Hz picture but dropped the signal as soon as those
+    jumps started (console test, 21 Oct 2026). `LOCK = 0` never jumps (the picture
+    tears/rolls if the clocks don't match the SNES; a full frame buffer needs SDRAM).
+  - Interlace changes the SNES frame length (262.5 lines average), which this fixed clock
+    doesn't follow: such games would re-align (a glitch) whenever the drift exceeds a line.
   - Interlaced SNES modes are shown with both fields on the same lines (no deinterlacing).
 - **Sync roles and colour mapping** (confirmed with `out/vtest.cor` on the console, 21 Oct 2026):
   - `SYNC_ORDER` (top-level parameter) = 3: P16 = VSYNC, M16 = DE, M18 = HSYNC. `-1` still
@@ -215,14 +229,15 @@ ch1/ch2/ch3 shown as R/G/B) and `build/sim/snes.log`, and fails unless the last 
 - Times on this box: GHDL ~8 s, Verilator ~30 s plus a few minutes of C++ compilation (~10 min
   while Quartus was running), simulation ~3–4 s per output frame (0.36 M SNES master cycles +
   1.24 M video cycles), so `make sim-snes` takes ~25 s once built.
-- Checks in `tb_snes.cpp`: output frame length (from frame 2 on: 748 or 749 lines), the
+- Checks in `tb_snes.cpp`: output frame length (from frame 2 on: 750 lines), the
   line-buffer ring (any video-clock cycle where the output reads the ring slot the capture side
   is writing counts as a conflict), the test ROM's WRAM results, and the summary band's colour
   in the last frame. `TB_DEBUG=1` prints where the conflicts and line-0 writes happen;
   `TB_ROM=<file.hex>` runs another ROM image without rebuilding.
 - **Result** (`build/sim/snes.log`): all 7 tests pass in the core (WRAM results `1 1 1 1 1 1 1`,
   done flag `$A5` already in the first output frame); from the second output frame on, the
-  frames are 748/749 lines with zero line-buffer conflicts; SNES line 0 is complete ~3 output
+  frames are 750 lines with zero line-buffer conflicts (SNES clock 21.44196 MHz since 21 Oct;
+  before that 748/749 lines); SNES line 0 is complete ~3 output
   lines before it is first shown. `build/sim/snes-05.png` shows the green summary band, 7 green
   test bands and the white/cyan squares; across frames the white one moves 3 output pixels
   (1 SNES pixel) per frame and the cyan one ~18. The first output frame (before the SNES
@@ -265,11 +280,11 @@ Verified (no hardware):
 - The test ROM passes in Mesen2 too.
 
 Not verified / assumptions:
-- Anything on the console: whether the PIC32 accepts and configures a Quartus `.cor`, whether
-  the AD9889B is left set up for 24-bit RGB 720p input (same assumption as vtest), W16 = 74.25 MHz.
-- Sync role order and colour channel order (cycled / parameterised, see Video).
+- **Console (21 Oct 2026):** the Quartus `.cor` loads, all 7 SA-1 tests pass and both CPUs run
+  (green summary + 7 green bars, white and cyan squares moving; video in Denley's thread). The
+  60 Hz version (SNES clock 21.44196 MHz) is not yet tried on the console.
 - AD9889B setup/hold numbers (assumed 1.5/1.0 ns; the real margin is ~6 ns either way).
-- Whether a TV accepts 748/749-line frames at 60.10 Hz (set `LOCK = 0` if not).
+- Whether the 60 Hz build holds the picture (it showed the same timing while free-running).
 - The simulation is of a GHDL-converted netlist with behavioural RAMs, not Quartus' netlist
   (no gate-level/timing simulation). Quartus' handling of the unconnected `ENABLE := '1'`
   VHDL port defaults (SA1Map, DSP_LHRomMap) is the same as in agg23's Pocket build, which works.

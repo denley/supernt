@@ -5,7 +5,7 @@ create_clock -name clk -period 13.468 [get_ports clk]
 derive_pll_clocks
 derive_clock_uncertainty
 
-# The SNES clock (fractional PLL output, 21.477 MHz) and the video clock are unrelated in phase:
+# The SNES clock (fractional PLL output, 21.442 MHz) and the video clock are unrelated in phase:
 # only a toggle synchroniser, a static mode bit and the dual-clock line buffer cross between
 # them.
 set clk_sys [get_clocks {pll|altera_pll_i|*[0].*|divclk}]

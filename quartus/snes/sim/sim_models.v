@@ -2,7 +2,7 @@
 // Simulation stand-ins for the Altera primitives and the parts of the core the simulation
 // leaves out (quartus/snes/sim).
 
-// PLL: the testbench drives the 21.477 MHz clock (tb.clk_sys) itself.
+// PLL: the testbench drives the SNES clock (tb.clk_sys) itself.
 module snes_pll (
     input  wire refclk,
     input  wire rst,

@@ -54,3 +54,10 @@ pulling it.
 - 21 Oct 2026, `07-buslog` (fixed sync order): **works**; 3 photos, one per page, log full
   (1024 events). Transcription in `notes/buslog-2026-10-21/`. Repeating 5-state strobe cycle,
   one state carrying varying data; long stretches look like polling for a reply.
+- 21 Oct 2026, `09-q-snes` (first Quartus core on the console), first build: nothing at all.
+  Rebuilt to free-run for 20 s before frame-locking: **the SNES + SA-1 core runs**: green summary
+  bar and 7 green test bars (all SA-1 tests pass), white and cyan squares moving, colours right;
+  rolling slowly while free-running (60.000 Hz output vs 60.0988 Hz SNES); at 20 s, when the
+  748/749-line frame lock started, the projector dropped the signal (blue "HDMI" no-signal
+  screen). So Quartus-built cores load, the PLL works, and this projector rejects varying
+  vertical totals. Fix: SNES clock 21.44196 MHz (0.16% slow) so SNES frames match 720p60 exactly.

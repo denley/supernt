@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Verilator testbench for the Super Nt SNES core (quartus/snes): runs the whole top with the
 // test ROM, writes each 720p output frame as a PPM and prints a per-frame report:
-// - output frame length in lines (frame lock: 748/749 once locked, 750 free-running),
+// - output frame length in lines (750 once aligned),
 // - line-buffer conflicts (output reading a ring slot while the SNES side writes it),
 // - the test ROM's result bytes in WRAM ($7E:00FE done flag, $7E:0100+k results).
 // Usage: tb_snes <frames> <out-prefix>   -> <out-prefix>NN.ppm
@@ -22,8 +22,8 @@ int main(int argc, char **argv) {
     auto tb = std::make_unique<Vtb>(ctx.get());
     auto *r = tb->rootp;
 
-    // Half periods in ps: 74.25 MHz and 21.477272 MHz.
-    const double h74 = 1e6 / 74.25 / 2, hsys = 1e6 / 21.477272 / 2;
+    // Half periods in ps: 74.25 MHz and the SNES clock (21.44196 MHz, snes_pll.v).
+    const double h74 = 1e6 / 74.25 / 2, hsys = 1e6 / 21.44196 / 2;
     double t74 = h74, tsys = hsys * 0.37;
     tb->clk = 0; tb->clk_sys = 0; tb->eval();
     // TB_ROM=<file.hex> replaces the ROM loaded by $readmemh (to try ROM variants without
@@ -60,10 +60,10 @@ int main(int argc, char **argv) {
                    wram[0xfc] | wram[0xfd] << 8);
             for (int k = 0; k < 8; k++) printf(" %d", wram[0x100 + k]);
             printf("\n");
-            // Frames 0-1 come before/at the first lock. From frame 2 on: locked frame lengths,
-            // no ring-buffer conflicts. Last frame: test results and the picture.
+            // Frames 0-1 come before/at the alignment jump. From frame 2 on: standard 750-line
+            // frames, no ring-buffer conflicts. Last frame: test results and the picture.
             if (frame >= 2) {
-                ok_lock &= lines_total == 748 || lines_total == 749;
+                ok_lock &= lines_total == 750;
                 ok_ring &= conflicts == 0;
             }
             ok_wram = wram[0xfe] == 0xa5 && wram[0xff] > 0;

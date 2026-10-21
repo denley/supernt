@@ -21,7 +21,7 @@ module snes_core #(
     parameter [23:0] RAM_MASK = 24'h0007FF,  // header RAM size $01 = 2 KB
     parameter        BSRAM_AW = 11           // BW-RAM bytes = 2^BSRAM_AW
 ) (
-    input  wire        clk_sys,      // 21.477 MHz (MCLK = ACLK)
+    input  wire        clk_sys,      // SNES master clock, 21.442 MHz (MCLK = ACLK)
     input  wire        reset,        // synchronous to clk_sys, active high
 
     output wire [7:0]  r, g, b,
