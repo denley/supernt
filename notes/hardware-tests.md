@@ -18,8 +18,8 @@ pulling it.
   silently on power-on (a few minutes, LED flickers red, HDMI blacks out), then boots the menu.
   Denley's first boot with the card was slow, which fits. JB7.2 (Jul 2023) is still the latest
   release (github.com/analoguejb/Analogue-Super-Nt-JB). Check: Tools has "Reload Save RAM"
-  (new in 7.2). Delete the `.bin` from the card next time it is in.
-- Installed `01-spc-colortest` as `spc.cor`.
+  (new in 7.2). The `.bin` was deleted from the card after the update.
+- Installed `01-spc-colortest` as `spc.cor`, then `05-vtest` (21 Oct evening).
 - The card had no `.spc` files. `tools/mkspc.py` makes `SPC/Super Nt test chord.spc`: a steady
   A major chord (440/554/659 Hz square waves; checked with libgme). Copied to
   the card 21 Oct; `tools/sdcore setup` copies it too.
@@ -41,4 +41,6 @@ pulling it.
 - 21 Oct 2026, JB7.2, `01-spc-colortest`: **loads and runs.** The SPC player UI showed and the
   test chord played. So the loader accepts a modified `spc.cor` (no hash or signature check, at
   least for a patch this small), and mkcor's frame handling is good on hardware. (A first "black
-  screen" report was the file not being started properly.) Colour scrambling not yet confirmed.
+  screen" report was the file not being started properly.) Denley's description: "a wave pattern that said
+  'super nt test' with various colours" (the player's visualiser and the ID666 title). Whether
+  the colours were scrambled can't be told from that; vtest (next) settles whether our bits run.
