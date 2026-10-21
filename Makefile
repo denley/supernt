@@ -135,6 +135,29 @@ out/q-%.cor: quartus/$$*/$$*.rbf
 	mkdir -p out
 	python3 -I tools/bitrev.py $< $@
 
+# Hardware test core (quartus/hwtest): status screen template, font (from the VGA 8x16 console
+# font) and audio sine table.
+quartus/hwtest/hwtest.rbf: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
+build/hwtest/screen.hex: quartus/hwtest/screen.txt tools/mkscreen.py
+	mkdir -p build/hwtest
+	python3 -I tools/mkscreen.py $< $@
+build/hwtest/font.hex: tools/psf2hex.py
+	mkdir -p build/hwtest
+	python3 -I tools/psf2hex.py /usr/share/consolefonts/Lat15-VGA16.psf.gz $@
+build/hwtest/sine.hex: tools/mksine.py
+	mkdir -p build/hwtest
+	python3 -I tools/mksine.py $@
+
+# Simulation of quartus/hwtest: a PIC32 stand-in on the link, one 720p frame per screen page
+# (build/sim/hwtest-P.png), the I2S stream decoded in both framings (quartus/hwtest/sim).
+sim-hwtest: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
+	mkdir -p build/sim
+	iverilog -g2012 -o build/sim/hwtest.vvp -s tb quartus/hwtest/sim/tb.sv quartus/hwtest/sim/models.v \
+	  quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/i2s_test.sv \
+	  quartus/common/link_logger.sv
+	cd build/sim && vvp -n hwtest.vvp > hwtest.log && tail -3 hwtest.log
+	python3 -I quartus/hwtest/sim/check.py build/sim
+
 # SNES + SA-1 core (quartus/snes, notes/snes-quartus.md): the test ROM is built into block RAM,
 # so the Quartus build depends on it.
 quartus/snes/snes.rbf: build/snes/sa1test.hex
@@ -217,5 +240,5 @@ FORCE:
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE sim-snes
+.PHONY: all clean FORCE sim-snes sim-hwtest
 .SECONDARY:

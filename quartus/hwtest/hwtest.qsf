@@ -1,0 +1,19 @@
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CEBA4F23C8
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name SDC_FILE hwtest.sdc
+set_global_assignment -name SYSTEMVERILOG_FILE ../common/textmode.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../common/i2s_test.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../common/link_logger.sv
+set_global_assignment -name VERILOG_FILE audio_pll.v
+set_global_assignment -name SYSTEMVERILOG_FILE hwtest_top.sv
+source ../common/supernt.tcl
+source pins.tcl
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch1[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch2[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch3[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s0
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s1
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s2
+
+set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"
