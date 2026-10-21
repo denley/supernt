@@ -67,9 +67,20 @@ out/blinky.cor` builds `hw/blinky` (first `make` of it also builds nextpnr, see 
 and `out/buslog.cor`. Quartus' timing models are the reference, and all test designs meet timing
 there. If an open-flow build misbehaves, try the `q-` one.
 
-Each replaces `SYSTEM/CORES/spc.cor` (keep the original). All only flip output inverters on pins
-the SPC core already drives (2 configuration frames), so electrically they only change logic
-levels on existing outputs.
+`out/q-snes.cor` (Quartus only, `notes/snes-quartus.md`) is the first real core: the MiSTer/Pocket
+SNES core with SA-1, all memory in block RAM, a built-in SA-1 test ROM, 720p60 out. It replaces
+`SYSTEM/CORES/spc.cor` like the others; pick any `.spc` file to start it. Expected: a
+black screen with a green bar at the top and 7 green bars below it (one per SA-1 test; red = that
+test failed), a white square creeping right at the bottom (SNES CPU alive) and a faster cyan one
+above it (SA-1 alive). Like vtest it cycles the HSYNC/VSYNC/DE order of P16/M16/M18 every 8 s, so
+the picture may only show in one 8 s window out of ~48 s; the small white boxes top left count
+the working order + 1. **Take a photo** (and note if the bars aren't green: that's the colour
+order). Simulated (`make sim-snes`), not yet tried on the console; it drives only the video pins.
+Power-cycle to get back to the menu.
+
+The cores below replace `SYSTEM/CORES/spc.cor` too (keep the original). The `spc-` ones only
+flip output inverters on pins the SPC core already drives (2 configuration frames), so
+electrically they only change logic levels on existing outputs.
 
 - `out/spc-colortest.cor` – inverts 16 colour pins. Expected: the SPC player's picture with
   scrambled colours and stable sync.

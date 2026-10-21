@@ -1,0 +1,31 @@
+--- upstream/CPU.vhd
++++ upstream/CPU.vhd
+@@ -570,6 +570,7 @@
+ 				when "01" => IRQ_TIME := H_TIME;					--H-IRQ:  every scanline, H=HTIME+~3.5
+ 				when "10" => IRQ_TIME := V_TIME;					--V-IRQ:  V=VTIME, H=~2.5
+ 				when "11" => IRQ_TIME := H_TIME and V_TIME;	--HV-IRQ: V=VTIME, H=HTIME+~3.5
++				when others => IRQ_TIME := '0';
+ 			end case;
+ 			
+ 			if ENABLE = '1' then
+--- upstream/DSP.vhd
++++ upstream/DSP.vhd
+@@ -371,6 +371,7 @@
+ 		variable ADDR_INC : unsigned(1 downto 0);
+ 		variable LR: integer range 0 to 1;
+ 	begin
++		LR := 0; -- ghdl needs the variable assigned on every path
+ 		RAM_DO <= x"00";
+ 		case RS is
+ 			when RS_SRCNL =>
+--- upstream/chip/DSP/DSPn.vhd
++++ upstream/chip/DSP/DSPn.vhd
+@@ -510,7 +510,7 @@
+ 	DATA_RAM_ADDR_A <= "000" & DP(7 downto 0) when VER(2)='0' else DP;
+ 	DATA_RAM_ADDR_B <= SS_RAM_A(11 downto 1) when SS_BUSY = '1' else
+ 						DP_ADDR(11 downto 1) when DP_SEL = '1' and (WR_N = '0' or RD_N = '0') else
+-						DATA_RAM_ADDR_A or x"40";
++						DATA_RAM_ADDR_A or ("000"&x"40"); -- length fix
+ 	DATA_RAM_WE <= '1' when OP_INSTR /= INSTR_JP and OP_DST = x"F" and EN = '1' else '0';
+ 	DATA_RAM_WE_B_L <= SS_RAM_WR and not SS_RAM_A(0) when SS_BUSY = '1' else (not WR_N and DP_SEL and not DP_ADDR(0));
+ 	DATA_RAM_WE_B_H <= SS_RAM_WR and SS_RAM_A(0) when SS_BUSY = '1' else (not WR_N and DP_SEL and DP_ADDR(0));

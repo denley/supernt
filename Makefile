@@ -135,10 +135,87 @@ out/q-%.cor: quartus/$$*/$$*.rbf
 	mkdir -p out
 	python3 -I tools/bitrev.py $< $@
 
+# SNES + SA-1 core (quartus/snes, notes/snes-quartus.md): the test ROM is built into block RAM,
+# so the Quartus build depends on it.
+quartus/snes/snes.rbf: build/snes/sa1test.hex
+
+# SA-1 test ROM (quartus/snes/testrom/sa1test.asm, layout and tests in its header). asar builds
+# one 8 KB block at $00:E000-$FFFF into a fresh file (asar patches existing files);
+# rom2hex.py --mirror copies it to all four 8 KB slots of the 32 KB image (the FPGA keeps 8 KB
+# and ignores the higher ROM address bits) and sets the checksum. The .hex is that 8 KB as
+# 16-bit little-endian words for $readmemh.
+ASAR := $(HOME)/src/vendor/asar/build/asar/bin/asar
+
+build/snes/sa1test.sfc: quartus/snes/testrom/sa1test.asm quartus/snes/testrom/rom2hex.py
+	mkdir -p build/snes
+	rm -f build/snes/sa1test-raw.sfc
+	$(ASAR) --fix-checksum=off $< build/snes/sa1test-raw.sfc
+	python3 -I quartus/snes/testrom/rom2hex.py --mirror build/snes/sa1test-raw.sfc $@
+
+build/snes/sa1test.hex: build/snes/sa1test.sfc quartus/snes/testrom/rom2hex.py
+	python3 -I quartus/snes/testrom/rom2hex.py $< $@ 8192
+
+testrom: build/snes/sa1test.sfc build/snes/sa1test.hex
+.PHONY: testrom
+
+# Simulation of the whole quartus/snes top (notes/snes-quartus.md, "Simulation"): the core's
+# VHDL goes through `ghdl synth` to Verilog, then Verilator. Work files (~1 GB of objects) go to
+# SNES_SIM; the rendered 720p frames end up in build/sim/snes-NN.png, the report in
+# build/sim/snes.log (last line PASS/FAIL: frame lock, line buffer, test results, picture).
+SNES_SIM    ?= $(HOME)/scratch/snes-quartus/sim
+SNES_UP     := $(HOME)/src/vendor/openfpga-SNES/rtl/upstream
+SNES_FRAMES ?= 6
+SNES_VHDL_SIM := quartus/snes/sim/bram_sim.vhd quartus/snes/sim/mlab_sim.vhd \
+  $(addprefix $(SNES_SIM)/upstream/,65C816/P65816_pkg.vhd 65C816/BCDAdder.vhd 65C816/AddSubBCD.vhd \
+  65C816/ALU.vhd 65C816/AddrGen.vhd 65C816/MCode.vhd 65C816/P65C816.vhd SPC700/SPC700_pkg.vhd \
+  SPC700/AddSub.vhd SPC700/BCDAdj.vhd SPC700/ALU.vhd SPC700/AddrGen.vhd SPC700/MCode.vhd \
+  SPC700/MulDiv.vhd SPC700/SPC700.vhd CEGen.vhd DSP_PKG.vhd PPU_PKG.vhd CPU.vhd SWRAM.vhd PPU.vhd \
+  SMP.vhd DSP.vhd SNES.vhd chip/SRTC.vhd chip/RTC4513.vhd chip/DSP/DSPn.vhd chip/DSP/OBC1.vhd \
+  chip/DSP/DSP_LHRomMap.vhd) quartus/snes/sim/sa1mult_sim.vhd \
+  $(addprefix $(SNES_SIM)/upstream/,chip/SA1/SA1DIV.vhd chip/SA1/SA1.vhd chip/SA1/SA1Map.vhd)
+SNES_GHDL := ghdl
+SNES_GA   := --std=08 -fsynopsys -frelaxed -fexplicit -Wno-shared -Wno-hide -Wno-binding
+SNES_SV   := quartus/snes/sim/tb.sv quartus/snes/snes_top.sv quartus/snes/snes_core.sv \
+  quartus/snes/snes_video.sv quartus/snes/sim/sim_models.v $(SNES_UP)/main.v
+
+# Vendor VHDL copied to the work dir with the GHDL fixes of quartus/snes/sim/ghdl.patch.
+$(SNES_SIM)/upstream/.stamp: quartus/snes/sim/ghdl.patch
+	rm -rf $(SNES_SIM)/upstream && mkdir -p $(SNES_SIM)/upstream
+	cd $(SNES_UP) && cp --parents 65C816/*.vhd SPC700/*.vhd *.vhd chip/*.vhd chip/DSP/*.vhd \
+	  chip/SA1/*.vhd $(SNES_SIM)/upstream/
+	cd $(SNES_SIM) && patch -s -p0 < $(CURDIR)/quartus/snes/sim/ghdl.patch
+	touch $@
+
+$(SNES_SIM)/vlog/.stamp: $(SNES_SIM)/upstream/.stamp quartus/snes/sim/bram_sim.vhd \
+    quartus/snes/sim/mlab_sim.vhd quartus/snes/sim/sa1mult_sim.vhd quartus/snes/sim/ghdl_fix.py
+	rm -rf $(SNES_SIM)/work $(SNES_SIM)/vlog && mkdir -p $(SNES_SIM)/work $(SNES_SIM)/vlog
+	cd $(SNES_SIM)/work && $(SNES_GHDL) -a $(SNES_GA) $(abspath $(SNES_VHDL_SIM))
+	cd $(SNES_SIM)/work && for t in SNES SA1Map DSP_LHRomMap; do \
+	  $(SNES_GHDL) synth $(SNES_GA) --latches $$( [ $$t = DSP_LHRomMap ] && echo "-gUSE_DSPn='0'" ) \
+	    --out=verilog $$t > ../vlog/$$t.v 2> ../vlog/$$t.log || { tail ../vlog/$$t.log; exit 1; }; \
+	  python3 -I $(CURDIR)/quartus/snes/sim/ghdl_fix.py ../vlog/$$t.v $${t}_ $$t $(SNES_UP)/main.v; done
+	touch $@
+
+$(SNES_SIM)/obj/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_SV) quartus/snes/sim/tb_snes.cpp
+	verilator --cc --exe --build -j 4 -O2 --top-module tb +1364-2005ext+v -Wno-fatal -Wno-lint -Wno-style \
+	  -Wno-MULTIDRIVEN -Wno-UNOPTFLAT -Wno-COMBDLY --x-assign fast --x-initial fast \
+	  -CFLAGS -O1 -Mdir $(SNES_SIM)/obj -o Vtb \
+	  -GROM_HEX='"$(CURDIR)/build/snes/sa1test.hex"' \
+	  $(SNES_SV) $(SNES_SIM)/vlog/SNES.v $(SNES_SIM)/vlog/SA1Map.v \
+	  $(SNES_SIM)/vlog/DSP_LHRomMap.v $(abspath quartus/snes/sim/tb_snes.cpp) \
+	  > $(SNES_SIM)/verilator.log 2>&1 || { tail -30 $(SNES_SIM)/verilator.log; exit 1; }
+
+sim-snes: $(SNES_SIM)/obj/Vtb build/snes/sa1test.hex
+	mkdir -p build/sim
+	rm -f build/sim/snes-*.p?m
+	$(SNES_SIM)/obj/Vtb $(SNES_FRAMES) build/sim/snes- > build/sim/snes.log; s=$$?; \
+	  cat build/sim/snes.log; \
+	  for f in build/sim/snes-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
+
 FORCE:
 
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE
+.PHONY: all clean FORCE sim-snes
 .SECONDARY:
