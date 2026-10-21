@@ -1,7 +1,8 @@
 #!/bin/sh
 # Manage test cores on the Super Nt SD card (mounted at $SD, default /mnt/sd).
 #
-#   tools/sdcore setup      copy the stock JB7.2 core and out/*.cor into $SD/TESTCORES (numbered)
+#   tools/sdcore setup      copy the stock JB7.2 core and out/*.cor into $SD/TESTCORES (numbered),
+#                           and a test .spc (tools/mkspc.py) into $SD/SPC
 #   tools/sdcore list       list TESTCORES, marking the one installed as SYSTEM/CORES/spc.cor
 #   tools/sdcore use NAME   install a TESTCORES core as spc.cor (NAME: `09`, `q-snes` or `09-q-snes`)
 #
@@ -22,6 +23,7 @@ case $1 in
 setup)
 	mkdir -p "$T"
 	cp firmware/jb7.2/SYSTEM/CORES/spc.cor "$T/00-stock-jb72.cor"
+	python3 -I tools/mkspc.py "$SD/SPC/Super Nt test chord.spc"
 	n=1
 	for c in $ORDER; do
 		cp "out/$c.cor" "$T/$(printf %02d $n)-$c.cor"
