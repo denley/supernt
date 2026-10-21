@@ -51,20 +51,41 @@ module top (
     wire vs = (y >= V_ACT + V_FP) && (y < V_ACT + V_FP + V_SYNC);
     wire de = (x < H_ACT) && (y < V_ACT);
 
-    // Top band: perm+1 white boxes, 100 px wide on a 160 px pitch.
-    wire        in_band  = (y >= 20) && (y < 100);
-    wire [10:0] bx       = x - 11'd40;
-    wire [3:0]  box      = bx / 11'd160;
-    wire        in_box   = in_band && (x >= 40) && (bx % 11'd160 < 100) && (box <= perm);
+    // Pattern state is kept in counters (no per-pixel division) so it meets timing at 74.25 MHz.
+    // Top band: perm+1 white boxes, 100 px wide on a 160 px pitch, from x = 40.
+    reg [7:0]  bpos = 0;            // position within the 160 px pitch
+    reg [3:0]  box = 0;
+    always @(posedge clk) begin
+        if (x == 39 || x == H_TOT - 1) begin
+            bpos <= 0;
+            box  <= 0;
+        end else if (bpos == 159) begin
+            bpos <= 0;
+            box  <= box + 4'd1;
+        end else
+            bpos <= bpos + 8'd1;
+    end
+    wire in_band = (y >= 20) && (y < 100);
+    wire in_box  = in_band && (x >= 40) && (bpos < 100) && (box <= perm);
 
     // Stripes: 24 x 25 px from y = 120; stripe k lights pin k only (x < 1024). x >= 1088: white.
-    wire [9:0]  sy       = y - 10'd120;
-    wire [4:0]  stripe   = sy / 10'd25;
-    wire        in_strip = (y >= 120) && (stripe < 24);
-    wire [23:0] one      = 24'h800000 >> stripe;
-    wire [23:0] pix      = in_box                ? 24'hffffff :
-                           in_strip && x < 1024  ? one :
-                           x >= 1088             ? 24'hffffff : 24'h000000;
+    reg [4:0]  stripe = 0, sline = 0;
+    reg [23:0] one = 0;
+    always @(posedge clk)
+        if (x == H_TOT - 1) begin
+            if (y == 119) begin
+                stripe <= 0; sline <= 0; one <= 24'h800000;
+            end else if (sline == 24) begin
+                sline <= 0;
+                stripe <= stripe + 5'd1;
+                one <= one >> 1;
+            end else
+                sline <= sline + 5'd1;
+        end
+    wire in_strip = (y >= 120) && (stripe < 24);
+    wire [23:0] pix = in_box                ? 24'hffffff :
+                      in_strip && x < 1024  ? one :
+                      x >= 1088             ? 24'hffffff : 24'h000000;
 
     always @(posedge clk) begin
         {ch1, ch2, ch3} <= de ? pix : 24'h000000;

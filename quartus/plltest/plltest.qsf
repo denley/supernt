@@ -1,0 +1,11 @@
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CEBA4F23C8
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name VERILOG_FILE ../../hw/plltest/plltest.v
+set_global_assignment -name VERILOG_FILE ../common/mistral_shim.v
+set_global_assignment -name SDC_FILE ../common/clk74.sdc
+source ../common/supernt.tcl
+source pins.tcl
+# Timing check only: the PLL clock is a pass-through of clk here.
+
+set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"

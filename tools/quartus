@@ -1,0 +1,7 @@
+#!/bin/sh
+# Run a Quartus command-line tool (quartus_sh, quartus_map, ...) with no network access, so
+# TalkBack/Problem Reporter can't send anything (notes/quartus.md). Lite needs no licence server.
+#   tools/quartus quartus_sh --flow compile <project>
+QUARTUS_ROOT=${QUARTUS_ROOT:-$HOME/altera_lite/25.1std/quartus}
+tool=$1; shift
+LC_ALL=C.UTF-8 exec unshare -rn "$QUARTUS_ROOT/bin/$tool" "$@"

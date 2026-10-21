@@ -90,18 +90,28 @@ module top (
     wire vs = (y >= V_ACT + V_FP) && (y < V_ACT + V_FP + V_SYNC);
     wire de = (x < H_ACT) && (y < V_ACT);
 
-    // Top band: perm+1 white boxes (as vtest).
-    wire        in_band = (y >= 20) && (y < 100);
-    wire [10:0] bx      = x - 11'd40;
-    wire [3:0]  box     = bx / 11'd160;
-    wire        in_box  = in_band && (x >= 40) && (bx % 11'd160 < 100) && (box <= perm);
-
+    // Pattern position counters (no per-pixel division, so it meets timing at 74.25 MHz).
+    // Top band: perm+1 white boxes (as vtest): 100 px wide on a 160 px pitch from x = 40.
+    reg [7:0]  bpos = 0;
+    reg [3:0]  box = 0;
     // Count bits: 20 cells on a 60 px pitch from x = 40, MSB first.
+    reg [5:0]  cpos = 0;
+    reg [4:0]  bcell = 0;
+    always @(posedge clk74) begin
+        if (x == 39 || x == H_TOT - 1) begin
+            bpos <= 0; box <= 0; cpos <= 0; bcell <= 0;
+        end else begin
+            if (bpos == 159) begin bpos <= 0; box <= box + 4'd1; end
+            else bpos <= bpos + 8'd1;
+            if (cpos == 59) begin cpos <= 0; bcell <= bcell + 5'd1; end
+            else cpos <= cpos + 6'd1;
+        end
+    end
+    wire        in_band = (y >= 20) && (y < 100);
+    wire        in_box  = in_band && (x >= 40) && (bpos < 100) && (box <= perm);
     wire        in_row  = (y >= 140) && (y < 220) && (x >= 40) && (x < 40 + 20 * 60);
-    wire [10:0] cx      = x - 11'd40;
-    wire [4:0]  cell    = cx / 11'd60;
-    wire        in_cell = cx % 11'd60 < 40;
-    wire        bit_on  = count[5'd19 - cell];
+    wire        in_cell = cpos < 40;
+    wire        bit_on  = count[5'd19 - bcell];
     wire        bit_px  = in_row && in_cell && (bit_on || y >= 210);
 
     // Status block.

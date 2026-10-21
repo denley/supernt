@@ -114,14 +114,31 @@ out/%.cor: $$(if $$(wildcard hw/$$*/pll.cfg),build/hw/$$*-pll.rbf,build/hw/$$*.r
 	mkdir -p out
 	tools/rbf2cor $(MODEL) $< build/spc.rbf $@
 
-# Simulate hw/buslog with Icarus Verilog; writes build/sim/buslog.ppm (one video frame).
-sim-buslog: hw/buslog/sim/tb.v hw/buslog/buslog.v
+# Simulate hw/<name> with Icarus Verilog (hw/<name>/sim/tb.v); writes build/sim/<name>.ppm (one
+# video frame) and a PNG of it.
+sim-%: hw/%/sim/tb.v $$(wildcard hw/$$*/*.v)
 	mkdir -p build/sim
-	iverilog -g2012 -o build/sim/buslog.vvp $^
-	vvp -n build/sim/buslog.vvp
+	iverilog -g2012 -o build/sim/$*.vvp $^
+	vvp -n build/sim/$*.vvp
+	convert build/sim/$*.ppm build/sim/$*.png
+
+# Quartus builds (notes/quartus.md): quartus/<name>/<name>.qsf -> out/q-<name>.cor. The .cor is a
+# plain bit reversal of Quartus' uncompressed .rbf; Quartus output is never decoded with mistral
+# (licence rule 1 in notes/quartus.md).
+.PRECIOUS: quartus/%.rbf
+quartus/%.rbf: FORCE
+	cd $(dir $@) && ../../tools/quartus quartus_sh --flow compile $(notdir $*) > build.log 2>&1 \
+	  || { tail -20 build.log; exit 1; }
+	@grep -q 'Timing requirements not met' $(dir $@)build.log && echo 'WARNING: timing not met' || true
+
+out/q-%.cor: quartus/$$*/$$*.rbf
+	mkdir -p out
+	python3 -I tools/bitrev.py $< $@
+
+FORCE:
 
 clean:
 	rm -rf build out
 
-.PHONY: all clean sim-buslog
+.PHONY: all clean FORCE
 .SECONDARY:

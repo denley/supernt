@@ -25,7 +25,10 @@ into `firmware/` (gitignored) and everything else is derived from it locally.
     (`hw/<name>/pll.cfg`, `notes/pll.md`).
 - `patches/*.bt` – edits applied to `spc.cor` to make `out/spc-<name>.cor`.
 - `hw/<name>/` – our own designs, built with yosys + nextpnr-mistral into `out/<name>.cor`
-  (`notes/toolchain.md`; no Quartus needed).
+  (`notes/toolchain.md`; no Quartus needed). `make sim-<name>` renders a simulated frame.
+- `quartus/<name>/` – Quartus Prime Lite builds (`make out/q-<name>.cor`; `notes/quartus.md`,
+  including the two licence rules this project follows). `tools/quartus` runs Quartus with no
+  network access.
 - `notes/` – findings, in more detail than below.
 
 `make` builds the tools and the test cores; `make out/spc-colortest.cor` builds one, `make
@@ -59,6 +62,10 @@ out/blinky.cor` builds `hw/blinky` (first `make` of it also builds nextpnr, see 
   candidate for the PIC32 link.
 
 ## Test cores
+
+`out/q-vtest.cor` and `out/q-buslog.cor` are Quartus builds of the same designs as `out/vtest.cor`
+and `out/buslog.cor`. Quartus' timing models are the reference, and all test designs meet timing
+there. If an open-flow build misbehaves, try the `q-` one.
 
 Each replaces `SYSTEM/CORES/spc.cor` (keep the original). All only flip output inverters on pins
 the SPC core already drives (2 configuration frames), so electrically they only change logic

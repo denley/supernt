@@ -12,3 +12,16 @@ tools/rbf2cor
 tools/fpllpins
 tools/cvinfo
 tools/pllinfo
+quartus/*/db/
+quartus/*/incremental_db/
+quartus/*/*.rpt
+quartus/*/*.summary
+quartus/*/*.done
+quartus/*/*.jdi
+quartus/*/*.pin
+quartus/*/*.sld
+quartus/*/*.sof
+quartus/*/*.smsg
+quartus/*/build.log
+quartus/*/c5_pin_model_dump.txt
+quartus/*/*.qws
