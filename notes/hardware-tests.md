@@ -49,6 +49,10 @@ pulling it.
      arrive, where, and how much of it (whole file, or the .spc structure only).
 2. `09-q-snes` rebuilt with audio (test ROM plays the chord after the SA-1 tests) and
    controller port 1 (backdrop turns blue while a button is held), using the settings from 1.
+3. `13-q-snes_sdram` (on the card since 22 Oct, not installed): the same test ROM, copied into
+   the x8 SDRAM pair at start-up and run from there (notes/snes-sdram.md). Same picture as
+   q-snes if the SDRAM read timing is right; built for capture at fall 3.5, so set its
+   parameters from hwtest's SDRAM page first if that point shows errors.
 
 ## Order
 
@@ -60,6 +64,8 @@ pulling it.
 | 07/08 | buslog / q-buslog | hex log of the PIC32 link; film ~3 min |
 | 09 | q-snes | green bar + 7 green test lines, white and cyan moving squares |
 | 10/11 | plltest / blinky | only if 05/06 show nothing |
+| 12 | q-hwtest | audio framing, pads, SDRAM capture, link log (see Next session) |
+| 13 | q-snes_sdram | as 09, but the ROM runs from SDRAM |
 | 00 | stock JB7.2 | restore |
 
 ## Results
