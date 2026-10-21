@@ -18,11 +18,14 @@
 // it arrives. Locked, every output frame is 748 or 749 lines, and the output starts reading
 // each SNES line 2.3-3.7 output lines after it was completely written; the writer stays less
 // than 16 lines ahead, so the ring never overflows (checked in simulation, sim/tb_snes.cpp).
-// LOCK = 0 free-runs at exactly 750 lines (the picture then tears/rolls).
+// LOCK = 0 free-runs at exactly 750 lines (the picture then tears/rolls). With LOCK = 1 the
+// output still free-runs for the first LOCK_DELAY frames, so a display that rejects the locked
+// timing shows the picture for that long and then loses it.
 module snes_video #(
     parameter OUT_W     = 768,     // picture width in output pixels (>= 512; 896 = 4:3)
     parameter LOCK      = 1,       // 1: lock output frames to the SNES (748/749 lines)
     parameter LOCK_LINE = 746,     // output line to jump to on the SNES frame event
+    parameter LOCK_DELAY = 1200,   // free-running frames before locking (1200 = 20 s)
     parameter SYNC_ORDER = -1      // -1: cycle the 6 HS/VS/DE pin orders every 8 s; 0-5: fixed
 ) (
     // capture side, clk_sys
@@ -120,6 +123,8 @@ module snes_video #(
     reg [10:0] hx /* verilator public_flat_rd */ = 11'd0;
     reg [9:0]  vy /* verilator public_flat_rd */ = 10'd0;
     reg        lock_req = 1'b0;
+    reg        lock_en = (LOCK_DELAY == 0);
+    reg [10:0] lock_cnt = 11'd0;
     reg [8:0]  frames = 9'd0;
     reg [9:0]  top = 10'd24;               // first picture line
     reg [8:0]  nlines = 9'd224;
@@ -130,20 +135,24 @@ module snes_video #(
     reg [10:0] acc = 11'd0;                // horizontal phase accumulator
 
     wire line_end = (hx == H_TOT - 1);
-    wire jump = LOCK && (lock_req || ev_vid);   // at line_end: go to LOCK_LINE
+    wire jump = LOCK && lock_en && (lock_req || ev_vid);   // at line_end: go to LOCK_LINE
     wire [9:0] vy_next = jump ? LOCK_LINE[9:0] : (vy == V_TOT - 1) ? 10'd0 : vy + 10'd1;
     always @(posedge clk_vid) begin
         hx <= line_end ? 11'd0 : hx + 11'd1;
         if (line_end) begin
             vy <= vy_next;
             lock_req <= 1'b0;
-        end else if (ev_vid && LOCK)
+        end else if (ev_vid && LOCK && lock_en)
             lock_req <= 1'b1;
 
         // Per-frame state, updated at the start of the vertical blank.
         if (line_end && vy == V_ACT - 1) begin
             top     <= m_sync[1] ? 10'd24 : 10'd1;
             nlines  <= m_sync[1] ? 9'd224 : 9'd239;
+            if (!lock_en) begin
+                lock_cnt <= lock_cnt + 11'd1;
+                if (lock_cnt + 11'd1 >= LOCK_DELAY) lock_en <= 1'b1;
+            end
             if (frames == 9'd479) begin
                 frames <= 9'd0;
                 perm   <= (perm == 3'd5) ? 3'd0 : perm + 3'd1;

@@ -17,6 +17,7 @@ module top #(
     parameter SYNC_ORDER = 3,
     parameter OUT_W      = 768,     // picture width on the 1280-pixel line (896 = 4:3)
     parameter LOCK       = 1,       // lock output frames to the SNES (snes_video.sv)
+    parameter LOCK_DELAY = 1200,    // ...after this many free-running frames (20 s)
     parameter [15:0] RESET_CYCLES = 16'hffff  // core reset after PLL lock (clk_sys cycles)
 ) (
     input  wire       clk,      // W16, 74.25 MHz
@@ -62,7 +63,7 @@ module top #(
     // ---------------------------------------------------------------- video
     wire [7:0] vr, vg, vb;
     wire       vs0, vs1, vs2;
-    snes_video #(.OUT_W(OUT_W), .LOCK(LOCK), .SYNC_ORDER(SYNC_ORDER)) video (
+    snes_video #(.OUT_W(OUT_W), .LOCK(LOCK), .LOCK_DELAY(LOCK_DELAY), .SYNC_ORDER(SYNC_ORDER)) video (
         .clk_sys(clk_sys), .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde),
         .high_res(high_res), .v224(v224),
         .clk_vid(clk_vid), .vr(vr), .vg(vg), .vb(vb), .s0(vs0), .s1(vs1), .s2(vs2), .perm()

@@ -8,6 +8,6 @@ module tb #(parameter ROM_HEX = "sa1test.hex") (
     output wire       pclk, s0, s1, s2,
     output wire [7:0] ch1, ch2, ch3
 );
-    top #(.ROM_HEX(ROM_HEX), .SYNC_ORDER(0), .RESET_CYCLES(16'd256)) dut (
+    top #(.ROM_HEX(ROM_HEX), .SYNC_ORDER(0), .LOCK_DELAY(0), .RESET_CYCLES(16'd256)) dut (
         .clk(clk), .pclk(pclk), .s0(s0), .s1(s1), .s2(s2), .ch1(ch1), .ch2(ch2), .ch3(ch3));
 endmodule
