@@ -14,8 +14,11 @@ pulling it.
   `spc.cor` (sha1 b03566d6…, Feb 2021). It has the same pinout as JB7.2's core.
   It is kept as `TESTCORES/99-stock-old-card.cor`.
 - Whole-card backup from before any change: `~/scratch/sd-backup-2026-10-21`.
-- Added `snt_firmware_verJB7.2.bin` in the root, so the console offers the JB7.2 update on boot.
-  Delete it from the card once the update is done.
+- Added `snt_firmware_verJB7.2.bin` in the root. There is no prompt: the console flashes it
+  silently on power-on (a few minutes, LED flickers red, HDMI blacks out), then boots the menu.
+  Denley's first boot with the card was slow, which fits. JB7.2 (Jul 2023) is still the latest
+  release (github.com/analoguejb/Analogue-Super-Nt-JB). Check: Tools has "Reload Save RAM"
+  (new in 7.2). Delete the `.bin` from the card next time it is in.
 - Installed `01-spc-colortest` as `spc.cor`.
 - The card had no `.spc` files. `tools/mkspc.py` makes `SPC/Super Nt test chord.spc`: a steady
   A major chord (440/554/659 Hz square waves; checked with libgme). Copied to
