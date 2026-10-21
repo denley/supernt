@@ -60,8 +60,9 @@ out/blinky.cor` builds `hw/blinky` (first `make` of it also builds nextpnr, see 
   The 24 colour pins are fed from a video RAM; a proposed per-channel pin order is in the notes.
 - Block RAM layout (x1 and x20 modes) solved against the Pocket SNES core's known ROMs, so RAM
   contents can be read and rewritten.
-- Two more 8-bit buses (banks 2A/3B) look like the x8 SDRAM pair; bank 4A's 8-bit bus is the best
-  candidate for the PIC32 link.
+- Two more 8-bit buses (banks 2A/3B) are the x8 SDRAM pair, run as one x16 memory at 115.86 MHz
+  with CL3 and full-page bursts (pin map and parameters in `notes/sdram.md`); bank 4A's 8-bit bus
+  is the best candidate for the PIC32 link.
 
 ## Test cores
 

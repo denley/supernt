@@ -48,6 +48,9 @@ So the board has two clock inputs, **W16 and H16**, both consistent with 74.25 M
 - **SDRAM clocks**: H8 (top bank) and AB11 (bank 3B) are DDIO output registers with no routed
   data – the usual `altddio_out` constant-data trick for an SDRAM clock. So H8 → the x16 SDRAM on
   the top bank (A–K rows, little used by the SPC player) and AB11 → the x8 pair.
+  **Superseded by `notes/sdram.md`**: full x8-pair pin map, controller parameters, and a second
+  148.5 MHz memory controller (clock H8) that pinmap.py misses because it drives top-bank pins
+  through HMC bypass ports without inverter lines.
 - **Right bank, x=54 (5A/5B): HDMI transmitter.**
   - 24 colour pins, registered in fabric, data from the port A outputs of two x20 M10Ks
     (`M10K.022.023` ports a0–a19, `M10K.022.031` ports b0–b3), traced with `tools/ffsrc.py`.
@@ -81,6 +84,7 @@ So the board has two clock inputs, **W16 and H16**, both consistent with 74.25 M
   the two x8 SDRAMs (clock AB11), with address/control on the neighbouring outputs.
   - 2A data D3 E2 L2 L1 G2 G1 C2 C1; outputs W2 AA2 AA1 U2 U1 N2 N1.
   - 3B data AB5 AB6 AB7 AA7 AB8 AA8 AA9 AA10; N8 bidir; outputs N6 P6 M6 P7 R7 P8 M8 R9 AA12.
+    (N8 and N6 … R9 belong to the 148.5 MHz controller, not the x8 pair; see `notes/sdram.md`.)
   - Write data comes straight from the B ports of x2 M10Ks (`011.004`–`007`, `022.004`–`007`,
     4 KB each – write buffers), OEs from fabric FFs, inputs captured with clock enables.
   (An earlier note read these as the PIC32 link; the SDRAM reading fits the photos better.)
@@ -97,10 +101,11 @@ So the board has two clock inputs, **W16 and H16**, both consistent with 74.25 M
   - The other 4A/3B outputs (AB12 AB13 AA13 AA14 AA15 AB15 AB17 AB18 AA17 AA18) come from the
     same LAB cluster (x 14–18, y 3–5) that drives the 2A outputs W2 … N1, i.e. SDRAM
     address/control for the x8 pair.
-- **Other inputs**: H11 and G12 (top bank) each feed two places in a symmetric way
-  (`LAB.025.019`, `LAB.040.011`) – candidates for the two controller-port data lines. T12 and U22
-  each feed one FF (buttons? controller IO lines?). Candidate controller latch/clock outputs: G13,
-  H15, F10, P14. All unconfirmed.
+- **Other inputs / controllers** (`notes/controllers.md`): the pad poller reads T12 (port 1
+  data) and drives P14 (latch) and J13 + K16 (clock, one FF). H11 and G12 are not pads but x16
+  SDRAM DQ, like J7 J9 K7 N8. U22 is the PIC link's /WR. Many top-bank pins (J13, K16, the x16
+  SDRAM) are driven from fabric through HMC bypass *data* ports, which `spc-pinmap.txt` doesn't
+  show.
 - **Open drain**: B11 plus A8 B10 A10 A9 A12 B12 C16 (via HMC bypass) are all driven from the
   same FF (`MLAB.023.040.2:FFT0`); G6 from another. Purpose unknown. The HDMI transmitter is an
   AD9889B (I2C-configured); nothing in this core looks like an I2C master with an init table, so
