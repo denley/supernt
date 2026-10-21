@@ -104,7 +104,8 @@ set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRAT
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to sd_ba[*]
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to sd_dq[*]
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to sd_cke
-# x8 SDRAM pair (notes/sdram.md). DQM candidates open-drain (spc.cor: constant open-drain
+# x8 SDRAM pair (notes/sdram.md). DQM candidates: driven low or released (0/Z in the HDL, an
+# open-drain buffer; spc.cor: constant open-drain
 # outputs); CKE candidate AB10 driven high.
 set_location_assignment PIN_AB11 -to sd_clk
 set_location_assignment PIN_AB17 -to sd_cs_n
@@ -150,4 +151,3 @@ set_location_assignment PIN_Y10 -to sd_dqm[4]
 set_location_assignment PIN_R11 -to sd_dqm[5]
 set_location_assignment PIN_R10 -to sd_dqm[6]
 set_location_assignment PIN_Y11 -to sd_dqm[7]
-set_instance_assignment -name OPEN_DRAIN_OUTPUT ON -to sd_dqm[*]
