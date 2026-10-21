@@ -1,0 +1,51 @@
+#!/bin/sh
+# Manage test cores on the Super Nt SD card (mounted at $SD, default /mnt/sd).
+#
+#   tools/sdcore setup      copy the stock JB7.2 core and out/*.cor into $SD/TESTCORES (numbered)
+#   tools/sdcore list       list TESTCORES, marking the one installed as SYSTEM/CORES/spc.cor
+#   tools/sdcore use NAME   install a TESTCORES core as spc.cor (NAME: `09`, `q-snes` or `09-q-snes`)
+#
+# The console only loads SYSTEM/CORES/spc.cor, so each test is a swap of that file.
+# `use 00` puts the stock JB7.2 core back.
+set -e
+SD=${SD:-/mnt/sd}
+T=$SD/TESTCORES
+cd "$(dirname "$0")/.."
+
+# Test order; see notes/hardware-tests.md.
+ORDER="spc-colortest spc-invert-ch1 spc-invert-ch2 spc-invert-ch3 vtest q-vtest buslog q-buslog
+q-snes plltest blinky"
+
+[ -d "$SD/SYSTEM/CORES" ] || { echo "no Super Nt card at $SD" >&2; exit 1; }
+
+case $1 in
+setup)
+	mkdir -p "$T"
+	cp firmware/jb7.2/SYSTEM/CORES/spc.cor "$T/00-stock-jb72.cor"
+	n=1
+	for c in $ORDER; do
+		cp "out/$c.cor" "$T/$(printf %02d $n)-$c.cor"
+		n=$((n + 1))
+	done
+	sync
+	"$0" list
+	;;
+list)
+	cur=$(sha1sum < "$SD/SYSTEM/CORES/spc.cor")
+	for f in "$T"/*.cor; do
+		[ "$(sha1sum < "$f")" = "$cur" ] && m='*' || m=' '
+		echo "$m $(basename "$f" .cor)"
+	done
+	;;
+use)
+	f=$(ls "$T/$2"-*.cor "$T/$2.cor" "$T"/*-"$2".cor 2>/dev/null | head -n 1)
+	[ -n "$f" ] || { echo "no core matching $2 in $T" >&2; exit 1; }
+	cp "$f" "$SD/SYSTEM/CORES/spc.cor"
+	sync
+	echo "installed $(basename "$f" .cor) as SYSTEM/CORES/spc.cor"
+	;;
+*)
+	sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+	exit 1
+	;;
+esac
