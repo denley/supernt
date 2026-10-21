@@ -91,7 +91,9 @@ So the board has two clock inputs, **W16 and H16**, both consistent with 74.25 M
   control signal (clock enable). That is an FPGA-as-slave parallel bus: the master drives
   strobes (read/write/select/address-latch) and the FPGA enables its data drivers on reads – the
   shape of a PIC32 PMP (parallel master port) in master mode with the FPGA as the peripheral.
-  Which input is which strobe is not known yet.
+  Decoded in `notes/pic-link.md`: A2..A0 = AB20 AA20 AA19, /RD = U21, /WR = U22 (a fifth
+  input), D7..D0 = AB21 AB22 AA22 Y21 Y22 W21 W22 V21 (not the order listed above); a 32-bit
+  auto-incrementing address register plus a data port.
   - The other 4A/3B outputs (AB12 AB13 AA13 AA14 AA15 AB15 AB17 AB18 AA17 AA18) come from the
     same LAB cluster (x 14–18, y 3–5) that drives the 2A outputs W2 … N1, i.e. SDRAM
     address/control for the x8 pair.

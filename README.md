@@ -17,7 +17,9 @@ into `firmware/` (gitignored) and everything else is derived from it locally.
     original verbatim (mistral's EDCRC differs from Quartus' in MLAB frames).
   - `pins.py` – rough per-pin I/O summary; `pinmap.py` – traced per-pin drivers/loads (follows
     the memory-controller bypass); `trace.py` – walk routing back/forward; `ffsrc.py` – follow
-    flip-flops back through buffer LUTs and E/F bypasses.
+    flip-flops back through buffer LUTs and E/F bypasses; `netlist.py` – gate-level netlist
+    (LUT equations, FF clock/enable/load/clear) around seed pins/ports, plus a cycle
+    simulator for the extracted logic (conventions and evidence in `notes/pic-link.md`).
   - `m10k.py` – dump block RAM contents (layout in `notes/spc-core.md`).
   - `cvinfo` – package pins and PLL clock-input pins from mistral's database.
   - `rbf2cor` – turn a nextpnr-built `.rbf` into a `.cor` with spc's options and I/O standards.
