@@ -67,6 +67,13 @@ levels on existing outputs.
 - `out/spc-invert-ch{1,2,3}.cor` – invert one proposed colour channel each. Expected on the mostly
   grey player screen: a clear tint (cyan if that channel is red, magenta if green, yellow if blue).
   Tells us whether the channel grouping is right and which channel is which.
+- `out/vtest.cor` – our own 720p60 video core (open-source flow, 74.25 MHz board clock, no PLL).
+  Cycles the HSYNC/VSYNC/DE role of pins P16/M16/M18 through all 6 orders, 8 s each; when the TV
+  shows a picture, the 1–6 white boxes at the top say which order works, and 24 stripes below
+  (one colour pin each, proposed order) plus a white block check the colour pin map. **Take a
+  photo.** A blank screen for the whole ~50 s cycle means the AD9889B isn't left configured for
+  us (or the clock/pixel-clock guess is wrong). It doesn't read the controller, so power-cycle to
+  get back to the menu.
 - `out/blinky.cor` – our first core built from scratch (open-source flow): a counter on the W16
   clock driving one HDMI colour pin. Nothing visible is expected; it only shows whether the console
   accepts a non-Quartus bitstream (no hang/error).

@@ -84,6 +84,7 @@ out/spc-%.cor: patches/%.bt build/spc.rbf tools/mistral-patch tools/mkcor.py
 	python3 -I tools/mkcor.py $(SPC_COR) build/spc-$*.rbf $@
 
 # Our own cores: hw/<name>/*.v (top module `top`) + hw/<name>/<name>.qsf -> out/<name>.cor.
+# Optional hw/<name>/nextpnr.args holds extra nextpnr flags (e.g. --freq for the timing target).
 # -nodsp: nextpnr-mistral has no DSP bels, so multipliers must stay in logic.
 .SECONDEXPANSION:
 build/hw/%.json: $$(wildcard hw/$$*/*.v)
@@ -91,7 +92,8 @@ build/hw/%.json: $$(wildcard hw/$$*/*.v)
 	$(YOSYS) -q -l build/hw/$*-yosys.log -p 'read_verilog $(wildcard hw/$*/*.v); synth_intel_alm -top top -nodsp; write_json $@'
 
 build/hw/%.rbf: build/hw/%.json hw/$$*/$$*.qsf $(NEXTPNR)
-	$(NEXTPNR) --device $(MODEL) --json $< --qsf hw/$*/$*.qsf --rbf $@ -l build/hw/$*-nextpnr.log -q
+	$(NEXTPNR) --device $(MODEL) --json $< --qsf hw/$*/$*.qsf --rbf $@ -l build/hw/$*-nextpnr.log -q \
+	  $(shell cat hw/$*/nextpnr.args 2>/dev/null)
 
 out/%.cor: build/hw/%.rbf build/spc.rbf tools/rbf2cor
 	mkdir -p out
