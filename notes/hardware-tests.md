@@ -37,6 +37,10 @@ pulling it.
 
 ## Next session (prepared 21–22 Oct overnight)
 
+Starting the player: Tools → "Play SPC Files" (picking a file in the file browser didn't start
+it for Denley). That player takes the whole `SPC/` folder, so for one-file tests only that file
+stays in `SPC/` and the rest wait in `SPC-later/` on the card (22 Oct: chord only).
+
 1. `12-q-hwtest` (installed as spc.cor): one core for audio framing, controller port 1, the x8
    SDRAM pair and the PIC32 link logger. For each of the three test files (chord, big 1MB,
    Gradius ROM), power-cycle, play it, and film the screen for a full minute **with sound**
