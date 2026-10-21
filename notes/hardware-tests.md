@@ -25,6 +25,16 @@ pulling it.
   A major chord (440/554/659 Hz square waves; checked with libgme). Copied to
   the card 21 Oct; `tools/sdcore setup` copies it too.
 
+## hwtest (12-q-hwtest) loading test files
+
+`SPC/` on the card holds three files for the link logger (CRC-32 = zlib):
+
+| file | size | CRC-32 whole | parts |
+|---|---|---|---|
+| `Super Nt test chord.spc` | 0x10200 | 68D8FB8F | header 0–FF ADACE265, RAM 100–100FF 0C96CDBE, DSP 10100–1017F 18EB6C01 |
+| `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
+| `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
+
 ## Order
 
 | # | core | look for |
