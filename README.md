@@ -79,6 +79,11 @@ levels on existing outputs.
 - `out/plltest.cor` – checks our PLL patching (`notes/pll.md`): same 720p screen and sync cycling
   as vtest, counts 21.477 MHz PLL cycles per frame. Big block solid white = PLL correct, stripes
   = wrong frequency, black = no PLL clock. White-on-black only, so the colour order doesn't matter.
+- `out/buslog.cor` – **PIC32 link logger** (all link pins are inputs, it never drives the bus).
+  Replace spc.cor, then pick an `.spc` file: the PIC32 talks to it as if it were the SPC player
+  and it shows the first transactions as hex on screen (format at the top of
+  `hw/buslog/buslog.v`; simulated with `make sim-buslog`). Same 720p/sync-order cycling as vtest,
+  and the page advances every full cycle, so **film the screen for ~3 minutes**.
 - `out/blinky.cor` – our first core built from scratch (open-source flow): a counter on the W16
   clock driving one HDMI colour pin. Nothing visible is expected; it only shows whether the console
   accepts a non-Quartus bitstream (no hang/error).

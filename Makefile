@@ -114,8 +114,14 @@ out/%.cor: $$(if $$(wildcard hw/$$*/pll.cfg),build/hw/$$*-pll.rbf,build/hw/$$*.r
 	mkdir -p out
 	tools/rbf2cor $(MODEL) $< build/spc.rbf $@
 
+# Simulate hw/buslog with Icarus Verilog; writes build/sim/buslog.ppm (one video frame).
+sim-buslog: hw/buslog/sim/tb.v hw/buslog/buslog.v
+	mkdir -p build/sim
+	iverilog -g2012 -o build/sim/buslog.vvp $^
+	vvp -n build/sim/buslog.vvp
+
 clean:
 	rm -rf build out
 
-.PHONY: all clean
+.PHONY: all clean sim-buslog
 .SECONDARY:
