@@ -61,3 +61,6 @@ pulling it.
   748/749-line frame lock started, the projector dropped the signal (blue "HDMI" no-signal
   screen). So Quartus-built cores load, the PLL works, and this projector rejects varying
   vertical totals. Fix: SNES clock 21.44196 MHz (0.16% slow) so SNES frames match 720p60 exactly.
+- 21 Oct 2026, `09-q-snes` with the 21.44196 MHz SNES clock (60.000 Hz, standard 720p60
+  totals): **stable picture**, no rolling or dropouts. All 7 SA-1 tests green, both squares
+  moving. Frames: `photos/q-snes-60hz-2026-10-21.jpg`. Milestone 1 done on hardware.

@@ -282,9 +282,8 @@ Verified (no hardware):
 Not verified / assumptions:
 - **Console (21 Oct 2026):** the Quartus `.cor` loads, all 7 SA-1 tests pass and both CPUs run
   (green summary + 7 green bars, white and cyan squares moving; video in Denley's thread). The
-  60 Hz version (SNES clock 21.44196 MHz) is not yet tried on the console.
+  60 Hz version (SNES clock 21.44196 MHz) gives a stable picture on the test projector.
 - AD9889B setup/hold numbers (assumed 1.5/1.0 ns; the real margin is ~6 ns either way).
-- Whether the 60 Hz build holds the picture (it showed the same timing while free-running).
 - The simulation is of a GHDL-converted netlist with behavioural RAMs, not Quartus' netlist
   (no gate-level/timing simulation). Quartus' handling of the unconnected `ENABLE := '1'`
   VHDL port defaults (SA1Map, DSP_LHRomMap) is the same as in agg23's Pocket build, which works.
