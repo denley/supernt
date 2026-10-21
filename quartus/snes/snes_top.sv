@@ -20,7 +20,11 @@ module top #(
     parameter [15:0] RESET_CYCLES = 16'hffff, // core reset after PLL lock (clk_sys cycles)
     // Serial audio framing the AD9889B expects (notes/audio.md): 0 = I2S, 1 = left-justified.
     // Not confirmed yet (quartus/hwtest plays both).
-    parameter AUD_FRAMING = 0
+    parameter AUD_FRAMING = 0,
+    // Controller port wiring (notes/controllers.md, numbering as quartus/common/pad_test.sv):
+    // bit 1 = swap roles (latch on J13/K16, clock on P14), bit 0 = invert both outputs.
+    // Not confirmed yet (quartus/hwtest tries all four).
+    parameter [1:0] PAD_CFG = 2'd0
 ) (
     input  wire       clk,      // W16, 74.25 MHz
     output wire       pclk,     // M22, pixel clock to the AD9889B
@@ -34,7 +38,12 @@ module top #(
     output wire       aud_mclk, // L17, 12.288 MHz
     output wire       aud_bclk, // L19, 3.072 MHz
     output wire       aud_lrclk,// K17, 48 kHz
-    output wire       aud_sdata // L18
+    output wire       aud_sdata,// L18
+    // controller port 1 (notes/controllers.md)
+    output reg        pad_p14 = 1'b0,  // likely LATCH
+    output reg        pad_j13 = 1'b0,  // } likely CLOCK (ports 1 and 2, same signal as spc.cor)
+    output reg        pad_k16 = 1'b0,  // }
+    input  wire       pad_t12          // port 1 data
 );
     // ---------------------------------------------------------------- clocks and reset
     wire clk_vid = clk;         // 720p pixel clock straight from the 74.25 MHz board clock
@@ -62,11 +71,25 @@ module top #(
     wire [7:0] r, g, b;
     wire       dotclk, hde, vde, high_res, v224;
     wire [15:0] audio_l /* verilator public_flat_rd */, audio_r;
+    wire        joy_strb, joy_clk, joy_d0;
     snes_core #(.ROM_HEX(ROM_HEX)) snes (
         .clk_sys(clk_sys), .reset(core_reset),
         .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde), .high_res(high_res),
-        .v224(v224), .audio_l(audio_l), .audio_r(audio_r)
+        .v224(v224), .audio_l(audio_l), .audio_r(audio_r),
+        .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_d0(joy_d0)
     );
+
+    // ---------------------------------------------------------------- controller port 1
+    (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+    reg [1:0] t12_s = 2'b11;
+    assign joy_d0 = t12_s[1];
+    wire latch_ln = joy_strb, clock_ln = ~joy_clk;      // real line levels: clock idles high
+    always @(posedge clk_sys) begin
+        t12_s   <= {t12_s[0], pad_t12};
+        pad_p14 <= (PAD_CFG[1] ? clock_ln : latch_ln) ^ PAD_CFG[0];
+        pad_j13 <= (PAD_CFG[1] ? latch_ln : clock_ln) ^ PAD_CFG[0];
+        pad_k16 <= (PAD_CFG[1] ? latch_ln : clock_ln) ^ PAD_CFG[0];
+    end
 
     // ---------------------------------------------------------------- video
     wire [7:0] vr, vg, vb;

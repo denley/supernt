@@ -177,6 +177,10 @@ module sdram_test #(
     // rv[k] is high k+1 cycles after the READ appeared on the pins (cycle T); dq_p then holds the
     // pins at rising edge T+k+1 and dq_n2 those at falling edge T+k+0.5.
     reg [31:0] pass_err [0:7];
+    reg [31:0] pe_snap [0:7];
+    reg [31:0] bestr = 32'd0;
+    reg [3:0]  mi = 4'd9;
+    reg        mode_snap = 1'b1;
     reg        dqm_this = 1'b1;
     reg        pass_d = 1'b0;
     always @(posedge clk) begin
@@ -194,21 +198,27 @@ module sdram_test #(
                 first_bad <= {10'd0, rad[5]}; first_got <= dq_n2; first_exp <= re[5];
             end
         end
-        // at the end of each pass, add the best candidate's count to the DQM-mode total
+        // At the end of each pass, add the best candidate's count to the total for the DQM mode
+        // the pass ran with: snapshot the counts, then find the minimum one per cycle (the
+        // pass is ~0.5 s long, so there is no hurry).
         pass_d <= passes[0];
         if (pass_d != passes[0]) begin
-            if (dqm_this) err_dqm0 <= err_dqm0 + best;
-            else          err_dqmz <= err_dqmz + best;
-            for (k = 0; k < 8; k = k + 1) pass_err[k] <= 0;
-            dqm_this <= dqm_low;
+            for (k = 0; k < 8; k = k + 1) begin
+                pe_snap[k] <= pass_err[k];
+                pass_err[k] <= 0;
+            end
+            mode_snap <= dqm_this;
+            dqm_this  <= dqm_low;
+            mi    <= 4'd0;
+            bestr <= 32'hFFFFFFFF;
+        end else if (mi < 4'd8) begin
+            if (pe_snap[mi[2:0]] < bestr) bestr <= pe_snap[mi[2:0]];
+            mi <= mi + 4'd1;
+        end else if (mi == 4'd8) begin
+            if (mode_snap) err_dqm0 <= err_dqm0 + bestr;
+            else           err_dqmz <= err_dqmz + bestr;
+            mi <= 4'd9;
         end
-    end
-    // fewest errors over the candidates this pass
-    reg [31:0] best;
-    always @* begin
-        best = pass_err[0];
-        for (k = 1; k < 8; k = k + 1)
-            if (pass_err[k] < best) best = pass_err[k];
     end
     initial for (k = 0; k < 8; k = k + 1) pass_err[k] = 0;
 endmodule

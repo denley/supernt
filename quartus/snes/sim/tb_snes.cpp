@@ -25,7 +25,9 @@ int main(int argc, char **argv) {
     // Half periods in ps: 74.25 MHz and the SNES clock (21.44196 MHz, snes_pll.v).
     const double h74 = 1e6 / 74.25 / 2, hsys = 1e6 / 21.44196 / 2;
     double t74 = h74, tsys = hsys * 0.37;
-    tb->clk = 0; tb->clk_sys = 0; tb->eval();
+    tb->clk = 0; tb->clk_sys = 0;
+    tb->pad_t12 = getenv("TB_PAD") ? 0 : 1;   // TB_PAD=1: data line low = every button held
+    tb->eval();
     // TB_ROM=<file.hex> replaces the ROM loaded by $readmemh (to try ROM variants without
     // rebuilding the model).
     if (const char *rom = getenv("TB_ROM")) {

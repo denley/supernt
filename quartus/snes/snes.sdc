@@ -26,3 +26,6 @@ set_output_delay -clock pclk_out -min -1.0 $video_out
 # Serial audio: registered outputs sampled by the AD9889B on BCLK (325 ns period); MCLK is a
 # DDIO copy of the 12.288 MHz PLL clock.
 set_false_path -to [get_ports {aud_mclk aud_bclk aud_lrclk aud_sdata}]
+# Controller port: microsecond-scale signals.
+set_false_path -to [get_ports {pad_p14 pad_j13 pad_k16}]
+set_false_path -from [get_ports {pad_t12}]

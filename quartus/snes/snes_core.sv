@@ -10,7 +10,7 @@
 // - No ROM loading or header parsing: ROM_TYPE/ROM_MASK/RAM_MASK are parameters (what the
 //   Pocket's rom_parser.sv / MiSTer derive from the header: SA-1 = ROM_TYPE 8'h60, masks =
 //   (1024 << size) - 1).
-// - No controllers (no buttons pressed), no cheats, no save states, no MSU, no audio output.
+// - Controller port 1 only (serial lines out, see snes_top.sv); no cheats, save states, MSU.
 // The RAMs are plain inferred Verilog (Quartus maps them to M10K; Verilator simulates the same
 // code). Reads have one clk_sys cycle of latency like the altsyncram wrappers in bram.vhd.
 module snes_core #(
@@ -30,7 +30,12 @@ module snes_core #(
     output wire        vde,          // vertical display enable (224/239 lines)
     output wire        high_res,     // 512-pixel line (true or pseudo hi-res)
     output wire        v224,         // 224-line mode (overscan off)
-    output wire [15:0] audio_l, audio_r
+    output wire [15:0] audio_l, audio_r,
+    // controller port lines, core polarity: strobe = latch (active high), clk = 1 while a
+    // clock pulse is in progress (the real line is low then), d0 = port 1 data as on the pin
+    output wire        joy_strb,
+    output wire        joy_clk,
+    input  wire        joy1_d0
 );
     // Reset as in MAIN_SNES: released on a fixed phase of a 4-cycle divider.
     reg       reset_n = 1'b0;
@@ -55,6 +60,9 @@ module snes_core #(
     wire [15:0] aram_addr;
     wire [7:0]  aram_d, aram_q;
     wire        aram_ce_n, aram_oe_n, aram_we_n;
+
+    wire joy1_clk, joy2_clk;
+    assign joy_clk = joy1_clk | joy2_clk;
 
     main #(
         .USE_CX4(1'b0), .USE_SDD1(1'b0), .USE_GSU(1'b0), .USE_SA1(1'b1), .USE_DSPn(1'b0),
@@ -90,8 +98,9 @@ module snes_core #(
         .R(r), .G(g), .B(b),
         .HBLANKn(hde), .VBLANKn(vde), .HSYNC(), .VSYNC(), .HVCNT_ATZERO(),
 
-        // No controllers: data lines idle high = no buttons pressed.
-        .JOY1_DI(2'b11), .JOY2_DI(2'b11), .JOY_STRB(), .JOY1_CLK(), .JOY2_CLK(),
+        // Port 1 D0 from the pad, D1 and port 2 idle high (no buttons pressed).
+        .JOY1_DI({1'b1, joy1_d0}), .JOY2_DI(2'b11), .JOY_STRB(joy_strb), .JOY1_CLK(joy1_clk),
+        .JOY2_CLK(joy2_clk),
         .JOY1_P6(), .JOY2_P6(), .JOY2_P6_in(1'b1), .SNI_JOY(),
 
         .EXT_RTC(65'd0),

@@ -34,7 +34,8 @@
 ;                            SA-1 forever after its tests; still if SA-1 dead)
 ;   rows 192-207           : white $7FFF 16x16 sprite, SNES heartbeat:
 ;                            x = 16 + (frame counter mod 208), +1 px per frame
-;   everything else        : black $0000
+;   everything else        : black $0000, or dark blue $5000 while a button
+;                            on controller port 1 is held (auto-joypad read)
 ;
 ; The BG1 tilemap is static (from ROM); band b (0 = summary, 1+k = test k) uses
 ; BG palette b, and its status colour is CGRAM entry 4b+1, rewritten by every
@@ -240,9 +241,9 @@ Reset:
     lda.b #!N
     sta !NumTests
 
-    ; NMI on from here (only counts frames until !VideoReady is set)
+    ; NMI on from here (only counts frames until !VideoReady is set), auto-joypad read on
     lda $4210
-    lda.b #$80
+    lda.b #$81
     sta $4200
 
     ; ---- SA-1 setup (SA-1 is in reset after power-on; make sure) ----
@@ -682,6 +683,21 @@ Nmi:
     inx
     cpx.w #16
     bne -
+    ; controller: backdrop (CGRAM 0) dark blue while any port-1 button is held
+    ; (auto-joypad result of the previous frame), black otherwise
+    stz $2121
+    rep #$20
+    lda $4218
+    sep #$20
+    beq +
+    lda.b #$00
+    sta $2122
+    lda.b #$50                  ; $5000 = blue 20
+    sta $2122
+    bra ++
++   stz $2122
+    stz $2122
+++
     ; OAM sprites 0 (SA-1 alive, palette 1) and 1 (heartbeat, palette 0)
     stz $2102
     stz $2103

@@ -35,6 +35,21 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session (prepared 21–22 Oct overnight)
+
+1. `12-q-hwtest` (installed as spc.cor): one core for audio framing, controller port 1, the x8
+   SDRAM pair and the PIC32 link logger. For each of the three test files (chord, big 1MB,
+   Gradius ROM), power-cycle, play it, and film the screen for a full minute **with sound**
+   while pressing a few buttons on a pad in port 1 (B, then Start, then A). Read off:
+   - AUDIO: which framing's pitch sounds clean (from the video's sound track: 440 Hz = I2S,
+     880 Hz = left-justified) -> `AUD_FRAMING` in quartus/snes/snes_top.sv.
+   - PADS: which cfg line reads FFFF0000 idle and changes with buttons -> `PAD_CFG`.
+   - SDRAM: which capture point stays at 0 errors, and whether DQM-low/off matters.
+   - LINK: big runs (address, byte count, CRC-32) vs the CRC table above: does the file
+     arrive, where, and how much of it (whole file, or the .spc structure only).
+2. `09-q-snes` rebuilt with audio (test ROM plays the chord after the SA-1 tests) and
+   controller port 1 (backdrop turns blue while a button is held), using the settings from 1.
+
 ## Order
 
 | # | core | look for |

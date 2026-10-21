@@ -66,3 +66,11 @@ set_location_assignment PIN_K17 -to aud_lrclk
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to aud_lrclk
 set_location_assignment PIN_L18 -to aud_sdata
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to aud_sdata
+# Controller port 1 (notes/controllers.md): outputs as spc.cor drives them, T12 without pull-up.
+set_location_assignment PIN_P14 -to pad_p14
+set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to pad_p14
+set_location_assignment PIN_J13 -to pad_j13
+set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to pad_j13
+set_location_assignment PIN_K16 -to pad_k16
+set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to pad_k16
+set_location_assignment PIN_T12 -to pad_t12
