@@ -424,3 +424,19 @@ chord file was run (results below); the link part showed why nothing else could 
     0.6 s (T 0x2F.. – 0x3164). Five runs checked against `build/test-big-1m.spc`, all match. So
     files much larger than an SPC are sent whole as long as the PIC accepts them as SPCs
     (header check: a .txt gave "ERROR: NOT AN SPC!"); a ROM can be loaded wrapped in an SPC.
+
+- 23 Oct 2026, `14-q-snes_load` (first console run, files from `tools/sdcore roms`): **SNES games
+  load from the SD card and run.** The user picked each file in the PIC's browser with the real
+  pad (Y = RUN worked). 0 SA1 TEST: INFO CRC OK, all 7 SA-1 tests green, squares moving, pad
+  turns the backdrop blue. Gradius III (512 KB LoROM): Konami logo, intro, weapon select,
+  gameplay. Kirby Super Star (4 MB SA-1): CRC 89D0F7DC verified, Nintendo/HAL logos, title,
+  game select, Spring Breeze, gameplay. SDRAM at 107 MHz (chip B, 8-bit) fine: late 0, forced
+  refresh 0.
+  - Problem: L+R+START back to the browser shows a frozen browser (power-cycle needed). The
+    PIC link log (L+R+SELECT, Kirby) shows after the file (T 0x1DCA): a screen update
+    (0x1018_0F6C, 8 bytes; 0x1000_D129 = 00), 0x0000_00FE = 06, 0x1000_0102 = 00,
+    0x1000_0010 = 00, then 0x1000_0021 = F8 at T 0x1DFD, and the UI loop stops for good (last
+    UI T 0x1DFE): after a run the PIC no longer reads the pad or redraws, i.e. it treats the
+    core as running; how the stock core gets back to the PIC's menu (menu button combo detected
+    by the core and signalled through a status register?) is the next thing to decode.
+  - Recording: `~/scratch/cap/rec-20261023-082437.mkv` (test at the end, ~62–67 min).
