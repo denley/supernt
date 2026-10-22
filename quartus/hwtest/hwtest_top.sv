@@ -38,7 +38,7 @@ module top #(
     parameter [11:0] SD_ROWS     = 12'd4095,  // SDRAM rows tested per bank (simulation: fewer)
     parameter integer VP_SCRIPT   = 1,         // vpress: 1 = DOWN, DOWN, RUN (the chord), 0 = explore
     parameter integer VP_WAIT_US  = 4_000_000, // virtual presses (vpress.sv): wait after the UI starts,
-    parameter integer VP_PRESS_US = 500_000,   //   press time,
+    parameter integer VP_PRESS_US = 100_000,   //   press time (0.5 s auto-repeated: v6 moved two rows),
     parameter integer VP_GAP_US   = 3_500_000, //   gap,
     parameter integer VP_DUMP_US  = 1_000_000, //   bit image of the screen at the end of each gap,
     parameter integer VP_DUMP_END = 50_000,    //   ending this long before the press
