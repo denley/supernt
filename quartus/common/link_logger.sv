@@ -87,7 +87,9 @@ module link_logger #(
     output reg  [31:0] last_act = 32'd0, // time of the last strobe
     output reg  [31:0] arm_t = 32'd0,   // time the port was armed
     // handshake
-    output reg  [3:0]  cand = FIRST_CAND,     // 0x2004 answer candidate now in use
+    // preserve: n_steps[0] toggles with cand[0], and Quartus merged the two, losing FIRST_CAND
+    // (hwtest v4 started at candidate 0)
+    (* preserve *) output reg  [3:0]  cand = FIRST_CAND,     // 0x2004 answer candidate now in use
     output wire [7:0]  answer,          // its value now
     output reg  [7:0]  n_steps = 8'd0,  // candidate steps so far
     output reg         polling = 1'b0,  // >= POLL_READS status reads seen

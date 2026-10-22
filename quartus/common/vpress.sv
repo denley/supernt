@@ -8,11 +8,15 @@
 //     transfer during the wait restarts it; FILE_BYTES data bytes during the wait = the file
 //     came without help: done, button F);
 //   - then press the buttons in ORDER, PRESS_US each, GAP_US apart, round and round;
-//   - the first `xfer` (a write run of XFER bytes, link_logger.sv) while pressing ends it for
-//     good and records the button pressed last before it.
+//   - the first `xfer` (a write run of XFER bytes, link_logger.sv) while pressing is recorded
+//     (the button pressed last before it), but pressing goes on: in hwtest v4, START gave two
+//     4 KB blocks and then the player presumably waited for a selection. Pressing ends for good
+//     once FILE_BYTES data bytes arrived since pressing began (the file).
 // Buttons are pad bit numbers (raw order, bit 0 first): 0 B, 1 Y, 2 SELECT, 3 START, 4 UP,
-// 5 DOWN, 6 LEFT, 7 RIGHT, 8 A, 9 X, 10 L, 11 R. Order: A, START, X, Y, L, R, UP, DOWN, LEFT,
-// RIGHT, SELECT, B (B and SELECT last: B may mean "back").
+// 5 DOWN, 6 LEFT, 7 RIGHT, 8 A, 9 X, 10 L, 11 R. Order (16, then round again): A, START, A,
+// START, DOWN, A, RIGHT, A, X, Y, L, R, UP, LEFT, SELECT, B (B and SELECT last: B may mean
+// "back"). Every press is GAP_US + PRESS_US after the previous one, so the log's times give
+// the press before any run.
 module vpress #(
     parameter integer WAIT_US    = 10_000_000,
     parameter integer PRESS_US   = 500_000,
@@ -37,9 +41,10 @@ module vpress #(
 );
     function [3:0] order(input [3:0] k);
         case (k)
-            4'd0: order = 4'd8;   4'd1: order = 4'd3;   4'd2: order = 4'd9;   4'd3: order = 4'd1;
-            4'd4: order = 4'd10;  4'd5: order = 4'd11;  4'd6: order = 4'd4;   4'd7: order = 4'd5;
-            4'd8: order = 4'd6;   4'd9: order = 4'd7;   4'd10: order = 4'd2;  default: order = 4'd0;
+            4'd0: order = 4'd8;   4'd1: order = 4'd3;   4'd2: order = 4'd8;   4'd3: order = 4'd3;
+            4'd4: order = 4'd5;   4'd5: order = 4'd8;   4'd6: order = 4'd7;   4'd7: order = 4'd8;
+            4'd8: order = 4'd9;   4'd9: order = 4'd1;   4'd10: order = 4'd10; 4'd11: order = 4'd11;
+            4'd12: order = 4'd4;  4'd13: order = 4'd6;  4'd14: order = 4'd2;  default: order = 4'd0;
         endcase
     endfunction
 
@@ -66,6 +71,7 @@ module vpress #(
                         n_wait <= n_wait + 8'd1;
                     end else if (dt >= WAIT_US) begin
                         state <= 2'd2;
+                        wbytes <= 32'd0;
                         t0 <= usec;
                         k <= 4'd0;
                         btn <= order(4'd0);
@@ -75,13 +81,18 @@ module vpress #(
                     end
                 end
             2'd2: begin
-                    if (xfer) begin
+                    if (wr) wbytes <= wbytes + 32'd1;
+                    if (wbytes >= FILE_BYTES) begin
                         state <= 2'd3;
                         mask <= 16'd0;
+                    end
+                    if (xfer && xfer_np == 8'd0) begin
                         xfer_btn <= btn;
                         xfer_np <= n_press;
                         xfer_t <= usec;
                         xfer_dt <= on ? dt : dt + PRESS_US;
+                    end
+                    if (wbytes >= FILE_BYTES) begin
                     end else if (on && dt >= PRESS_US) begin
                         on <= 1'b0;
                         mask <= 16'd0;
@@ -89,9 +100,9 @@ module vpress #(
                     end else if (!on && dt >= GAP_US) begin
                         on <= 1'b1;
                         t0 <= usec;
-                        k <= k == 4'd11 ? 4'd0 : k + 4'd1;
-                        btn <= order(k == 4'd11 ? 4'd0 : k + 4'd1);
-                        mask <= 16'd1 << order(k == 4'd11 ? 4'd0 : k + 4'd1);
+                        k <= k + 4'd1;
+                        btn <= order(k + 4'd1);
+                        mask <= 16'd1 << order(k + 4'd1);
                         n_press <= n_press + 8'd1;
                     end
                 end
