@@ -34,7 +34,10 @@ module is42s_model #(
     parameter integer T_WR_CLK  = 2,   // last write data to PRECHARGE, clocks
     parameter integer T_MRD_CLK = 2,
     parameter [11:0] MRS_EXPECT = 12'h037,
-    parameter real REF_MAX = 15625.0   // longest allowed REF interval (ns), checked after init
+    parameter real REF_MAX = 15625.0,  // longest allowed REF interval (ns), checked after init
+    // 10: the x16 pair as built for (1024 columns); 9: chip B as it is (512 columns per page,
+    // notes/sdram.md; quartus/snes_load), memory index {bank, row, column[8:0]}
+    parameter integer COL_BITS = 10
 ) (
     input  wire        clk, cs_n, ras_n, cas_n, we_n,
     input  wire [11:0] a,
@@ -92,7 +95,11 @@ module is42s_model #(
         end
     endtask
 
-    wire [23:0] rd_index = {bb, row[bb], bc};
+    localparam [9:0] CMASK = (10'd1 << COL_BITS) - 10'd1;
+    function [23:0] mi(input [1:0] b_, input [11:0] r_, input [9:0] c_);
+        mi = COL_BITS == 10 ? {b_, r_, c_} : {1'b0, b_, r_, c_[8:0]};
+    endfunction
+    wire [23:0] rd_index = mi(bb, row[bb], bc);
     always @(posedge clk) begin
         edge_n = edge_n + 1;
         t_edge = $realtime;
@@ -105,14 +112,14 @@ module is42s_model #(
             wr_on = 0;                           // any command ends the write burst
         if (wr_on) begin
             if ($realtime - t_dq < T_IS) err("write data setup violation");
-            mem[{bb, row[bb], bc}] = dq;
+            mem[mi(bb, row[bb], bc)] = dq;
             n_wr = n_wr + 1;
             t_wdata[bb] = $realtime; wdata_edge[bb] = edge_n; t_wedge = $realtime;
-            bc = bc + 1;
+            bc = (bc + 1) & CMASK;
         end
         if (rd_on && !cs_n && {ras_n, cas_n, we_n} != 3'b111) rd_on = 0;   // truncated (BST/PRE/...)
         if (rd_on) begin
-            qd[cl] = mem[rd_index]; qv[cl] = 1; bc = bc + 1;
+            qd[cl] = mem[rd_index]; qv[cl] = 1; bc = (bc + 1) & CMASK;
         end
         if (!cs_n) case ({ras_n, cas_n, we_n})
             3'b011: begin                                            // ACT
@@ -130,18 +137,19 @@ module is42s_model #(
                 if (!open[ba]) err("READ/WRITE to an idle bank");
                 if ($realtime - t_act[ba] < T_RCD - 0.01) err("tRCD");
                 if (a[10]) err("auto precharge (A10 = 1) not expected");
-                bb = ba; bc = a[9:0];
+                bb = ba; bc = a[9:0] & CMASK;
+                if (COL_BITS < 10 && a[9]) err("column bit 9 set (512-column page)");
                 if (we_n) begin
                     rd_on = 1; wr_on = 0;
-                    qd[cl] = mem[{ba, row[ba], a[9:0]}]; qv[cl] = 1; bc = bc + 1;
+                    qd[cl] = mem[mi(ba, row[ba], bc)]; qv[cl] = 1; bc = (bc + 1) & CMASK;
                     n_rd = n_rd + 1;
                 end else begin
                     rd_on = 0; wr_on = 1;
                     if ($realtime - t_dq < T_IS) err("write data setup violation");
-                    mem[{ba, row[ba], a[9:0]}] = dq;
+                    mem[mi(ba, row[ba], bc)] = dq;
                     n_wr = n_wr + 1;
                     t_wdata[ba] = $realtime; wdata_edge[ba] = edge_n; t_wedge = $realtime;
-                    bc = bc + 1;
+                    bc = (bc + 1) & CMASK;
                 end
             end
             3'b110: begin end                                        // BURST TERMINATE

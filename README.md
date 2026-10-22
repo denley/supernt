@@ -26,6 +26,8 @@ into `firmware/` (gitignored) and everything else is derived from it locally.
   - `rbf2cor` – turn a nextpnr-built `.rbf` into a `.cor` with spc's options and I/O standards.
   - `pllpatch.py` – give our designs fPLL clocks by copying spc's PLL configurations
     (`hw/<name>/pll.cfg`, `notes/pll.md`).
+  - `rom2spc.py` – wrap a SNES ROM in an `.spc` the SPC player sends over the link
+    (`notes/snes-load.md`); `sdcore` – manage test cores and those files on the SD card.
 - `patches/*.bt` – edits applied to `spc.cor` to make `out/spc-<name>.cor`.
 - `hw/<name>/` – our own designs, built with yosys + nextpnr-mistral into `out/<name>.cor`
   (`notes/toolchain.md`; no Quartus needed). `make sim-<name>` renders a simulated frame.
@@ -84,6 +86,13 @@ drives only the video pins. Power-cycle to get back to the menu.
 ROM in the x8 SDRAM pair: it copies the test ROM into SDRAM at start-up and runs from there. Same
 expected picture as `q-snes`. Simulated, not yet run on the console; set the read-capture point
 from the hwtest SDRAM result first (`quartus/snes_sdram/sdram_cfg.tcl`).
+
+`out/q-snes_load.cor` (Quartus only, `notes/snes-load.md`) loads the game from the SD card: the
+SPC player's file browser runs on it, and a ROM wrapped by `tools/rom2spc.py` (a silent `.spc`
+with the ROM appended) is sent over the PIC32 link into SDRAM chip B (8-bit), checked against
+its CRC-32 on a diagnostics page and started (LoROM/HiROM/SA-1 from the header). Hold
+L+R+SELECT for the diagnostics page, L+R+START for the browser. Simulated end to end; test
+procedure in the notes.
 
 Console results so far (`notes/hardware-tests.md`): `spc-colortest` loads and runs; `vtest`
 gives a picture (sync order 3, colour map in `notes/spc-core.md`).

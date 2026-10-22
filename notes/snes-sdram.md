@@ -1,5 +1,10 @@
 # SNES core with the cartridge ROM in SDRAM (quartus/snes_sdram, Oct 2026)
 
+(Superseded for the console by `quartus/snes_load`, `notes/snes-load.md`: chip B alone as an
+8-bit memory with 512-column pages and AB10 low, ROM loaded over the PIC32 link. The
+controller analysis below — clocks, latency budget, capture point, refresh slots — still
+applies to it.)
+
 `make out/q-snes_sdram.cor` builds the SNES + SA-1 core of `notes/snes-quartus.md` with the
 cartridge ROM in the x8 SDRAM pair (`notes/sdram.md`) instead of block RAM. Loading through the
 PIC32 link isn't wired in yet, so the core is self-contained: at start-up it copies the built-in

@@ -1,0 +1,41 @@
+--- chip/SA1/SA1.vhd
++++ chip/SA1/SA1.vhd
+@@ -167,6 +167,7 @@
+ signal VBP_EN					: std_logic;
+ signal VBP_RUN					: std_logic;
+ signal VBP_PRELOAD			: std_logic;
++signal VBP_WAIT				: std_logic;	-- supernt snes_load: ROM word taken one SA-1 cycle later
+ signal VBP_DAT					: std_logic_vector(7 downto 0);
+ 
+ --IRQ
+@@ -1047,6 +1048,7 @@
+ 		VBP_BUF <= (others => '0');
+ 		VBP_RUN <= '0';
+ 		VBP_PRELOAD <= '0';
++		VBP_WAIT <= '0';
+ 	elsif rising_edge(CLK) then
+ 		if EN = '1' then
+ 			if VBP_RUN = '0' then
+@@ -1108,7 +1110,13 @@
+ 						when others => null;
+ 					end case;
+ 				end if;
++			elsif VBP_EN = '1' and VBP_WAIT = '0' then
++				-- supernt snes_load: the ROM is 8 bits wide there, so the high byte of a word
++				-- arrives one memory cycle after the low one; take the word one SA-1 cycle
++				-- after the address went out (VDA stays on the ROM address meanwhile)
++				VBP_WAIT <= '1';
+ 			elsif VBP_EN = '1' then
++				VBP_WAIT <= '0';
+ 				if VBP_PRELOAD = '1' then
+ 					VBP_BUF <= x"0000" & ROM_DI;
+ 					VDA <= std_logic_vector( unsigned(VDA) + 2 );
+@@ -1117,6 +1125,8 @@
+ 					VBP_BUF(31 downto 16) <= ROM_DI;
+ 					VBP_RUN <= '0';
+ 				end if;
++			else
++				VBP_WAIT <= '0';	-- the SNES has the ROM bus: wait again
+ 			end if;
+ 		end if;
+ 	end if;

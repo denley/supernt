@@ -1,0 +1,22 @@
+ [y]SUPER NT SNES LOADER[w]  T {0.8} ms   state {2.1:y} [g]{E:24}
+ [y]LINK[w]  2004 answer {2.2@6:y}  status reads {3.8}  UI loops {4.8}
+       pad reads {5.8}  writes {6.8}  addr {7.8}  screen {33.8}
+ [y]FILE[w]  bytes {8.8:y}  CRC-32 {9.8:y}  end {10.8}  T {15.8}-{16.8}
+       ROM bytes {11.8:y}  CRC-32 {12.8:y}  order {13.8}  lost {14.4} {37.8}
+ [y]INFO[w]  {E:13}  ROM size {17.8:y}  CRC-32 {18.8:y}  tool type {19.2}
+       name [y]{E:32}
+ [y]HEADER[w] [y]{E:21}[w]  map {21.2@6} type {21.2@4} ROM {21.2@2} RAM {21.2}
+       checksum {22.4}/{23.4@4}  scores Lo {23.1} Hi {23.1@1} ExHi {23.1@2}  loads {24.2@2}
+       [g]{E:24}[w]  ROM_TYPE {24.2:y}  ROM mask {25.6:y}  RAM mask {26.6:y}
+ [y]SDRAM[w] read back: CRC-32 {20.8:y}  {E:24}
+       ROM reads {28.8}  REF forced {29.4@4} stalled {29.4}  late {30.4@4}  gap {30.3}
+ [y]SNES[w]  boot T {27.8}  frames {36.8}  pad {31.8} {E:7} polls {32.4}
+ [y]KEYS[w] hold L+R+SELECT: this page  L+R+START: file browser  L+R+A: boot anyway
+ [y]PIC LINK LOG[w] newest first, no UI loop or file  runs {35.8}  last UI {34.8}
+   #  K  ADDRESS   BYTES   D0  REPEATS  T ms
+   {61.1}  {58.1:y}  {56.8}  {57.6}  {58.2@6}  {59.4}     {60.6}
+   {61.1}  {58.1:y}  {56.8}  {57.6}  {58.2@6}  {59.4}     {60.6}
+   {61.1}  {58.1:y}  {56.8}  {57.6}  {58.2@6}  {59.4}     {60.6}
+   {61.1}  {58.1:y}  {56.8}  {57.6}  {58.2@6}  {59.4}     {60.6}
+   {61.1}  {58.1:y}  {56.8}  {57.6}  {58.2@6}  {59.4}     {60.6}
+   {61.1}  {58.1:y}  {56.8}  {57.6}  {58.2@6}  {59.4}     {60.6}

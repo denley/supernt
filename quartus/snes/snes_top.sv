@@ -98,7 +98,8 @@ module top #(
     snes_video #(.OUT_W(OUT_W), .LOCK(LOCK), .SYNC_ORDER(SYNC_ORDER)) video (
         .clk_sys(clk_sys), .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde),
         .high_res(high_res), .v224(v224),
-        .clk_vid(clk_vid), .vr(vr), .vg(vg), .vb(vb), .s0(vs0), .s1(vs1), .s2(vs2), .perm()
+        .clk_vid(clk_vid), .vr(vr), .vg(vg), .vb(vb), .s0(vs0), .s1(vs1), .s2(vs2), .perm(),
+        .cx(), .cy()
     );
 
     // Output registers (packed into the I/O cells, FAST_OUTPUT_REGISTER in snes.qsf).

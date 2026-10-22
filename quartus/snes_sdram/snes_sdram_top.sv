@@ -173,6 +173,7 @@ module top #(
             core_reset <= 1'b0;
     end
     reg [23:0] rom_mask /* verilator public_flat_rw */ = ROM_MASK;   // constant in hardware
+    reg [7:0]  rom_type /* verilator public_flat_rw */ = 8'h60;      // SA-1 (the sim may change it)
 
     // ---------------------------------------------------------------- SNES
     wire [7:0] r, g, b;
@@ -180,9 +181,10 @@ module top #(
     wire [15:0] audio_l /* verilator public_flat_rd */, audio_r;
     wire        joy_strb, joy_clk, joy_d0;
     snes_sdram_core snes (
-        .clk_sys(clk_sys), .reset(core_reset), .rom_mask(rom_mask),
+        .clk_sys(clk_sys), .reset(core_reset), .rom_type(rom_type), .rom_mask(rom_mask),
+        .ram_mask(24'h0007FF),
         .rom_addr(rom_addr), .rom_word(rom_word), .rom_q(rom_q), .rom_oe_n(rom_oe_n),
-        .sysclkf_ce(sysclkf_ce),
+        .sysclkf_ce(sysclkf_ce), .sysclkr_ce(),
         .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde), .high_res(high_res),
         .v224(v224), .audio_l(audio_l), .audio_r(audio_r),
         .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_d0(joy_d0)
@@ -206,7 +208,8 @@ module top #(
     snes_video #(.OUT_W(OUT_W), .LOCK(LOCK), .SYNC_ORDER(SYNC_ORDER)) video (
         .clk_sys(clk_sys), .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde),
         .high_res(high_res), .v224(v224),
-        .clk_vid(clk_vid), .vr(vr), .vg(vg), .vb(vb), .s0(vs0), .s1(vs1), .s2(vs2), .perm()
+        .clk_vid(clk_vid), .vr(vr), .vg(vg), .vb(vb), .s0(vs0), .s1(vs1), .s2(vs2), .perm(),
+        .cx(), .cy()
     );
 
     // Output registers (packed into the I/O cells, FAST_OUTPUT_REGISTER in snes.qsf).

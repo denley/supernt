@@ -9,21 +9,23 @@
 // does on the Pocket, minus everything this board doesn't have yet:
 // - WRAM 128 KB, VRAM 2 x 32 KB, ARAM 64 KB and BW-RAM (BSRAM) are M10K; the cartridge ROM is
 //   served through the rom_* ports (SDRAM, quartus/common/sdram_rom.sv).
-// - No header parsing: ROM_TYPE/RAM_MASK are parameters, rom_mask an input (what the Pocket's
-//   rom_parser.sv / MiSTer derive from the header: SA-1 = ROM_TYPE 8'h60, masks =
-//   (1024 << size) - 1).
+// - No header parsing here: rom_type, rom_mask and ram_mask are inputs (what the Pocket's
+//   rom_parser.sv / MiSTer derive from the header: SA-1 = ROM_TYPE 8'h60, LoROM 00, HiROM 01,
+//   masks = (1024 << size) - 1); quartus/snes_load derives them at run time
+//   (rom_loader.sv), quartus/snes_sdram passes constants. They must only change while the core
+//   is in reset (the SDC treats them as static).
 // - Controller port 1 only (serial lines out, see snes_sdram_top.sv); no cheats, save states,
 //   MSU.
 // The RAMs are plain inferred Verilog (Quartus maps them to M10K; Verilator simulates the same
 // code). Reads have one clk_sys cycle of latency like the altsyncram wrappers in bram.vhd.
 module snes_sdram_core #(
-    parameter [7:0]  ROM_TYPE = 8'h60,       // [7:4] = 6: SA-1, [3:0] = 0: LoROM area
-    parameter [23:0] RAM_MASK = 24'h0007FF,  // header RAM size $01 = 2 KB
     parameter        BSRAM_AW = 11           // BW-RAM bytes = 2^BSRAM_AW
 ) (
     input  wire        clk_sys,      // SNES master clock, 21.442 MHz (MCLK = ACLK)
     input  wire        reset,        // synchronous to clk_sys, active high
+    input  wire [7:0]  rom_type,     // [7:4] = 6: SA-1, [3:0] = 0 LoROM, 1 HiROM, 2 ExHiROM
     input  wire [23:0] rom_mask,     // (1024 << header ROM size) - 1; $7FFF = 32 KB
+    input  wire [23:0] ram_mask,     // (1024 << header RAM size) - 1, 0 = none
 
     // cartridge ROM (main.v ROM_*): byte address, word/byte read, data; ROM_OE_N is the
     // SA-1's CLK_CE for SA-1 carts (SA1.vhd ROM_RD_N), SYSCLKF_CE the SNES bus cycle end
@@ -32,6 +34,7 @@ module snes_sdram_core #(
     input  wire [15:0] rom_q,
     output wire        rom_oe_n,
     output wire        sysclkf_ce,
+    output wire        sysclkr_ce,
 
     output wire [7:0]  r, g, b,
     output wire        dotclk,       // PPU dot clock phase: 1 = sub/left half, 0 = main/right
@@ -77,9 +80,9 @@ module snes_sdram_core #(
         .RESET_N(reset_n),
         .MCLK(clk_sys), .ACLK(clk_sys),
 
-        .ROM_TYPE(ROM_TYPE), .ROM_MASK(rom_mask), .RAM_MASK(RAM_MASK), .RAM_SIZE(4'd0),
+        .ROM_TYPE(rom_type), .ROM_MASK(rom_mask), .RAM_MASK(ram_mask), .RAM_SIZE(4'd0),
 
-        .SYSCLKR_CE(), .SYSCLKF_CE(sysclkf_ce), .REFRESH(),
+        .SYSCLKR_CE(sysclkr_ce), .SYSCLKF_CE(sysclkf_ce), .REFRESH(),
 
         .ROM_ADDR(rom_addr), .ROM_D(), .ROM_Q(rom_q), .ROM_CE_N(), .ROM_OE_N(rom_oe_n),
         .ROM_WE_N(), .ROM_WORD(rom_word),

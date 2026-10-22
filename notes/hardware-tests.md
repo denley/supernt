@@ -35,6 +35,22 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session: q-snes_load (prepared 22 Oct)
+
+The SNES core that loads its ROM over the link (`notes/snes-load.md`; procedure in its "Console
+test" section): `tools/sdcore setup`, `tools/sdcore use 14`, `tools/sdcore roms` (three wrapped
+ROMs into `SPC/`: "0 SA1 TEST.spc", "1 Gradius III.spc", "2 Kirby Super Star.spc"). Start "Play
+SPC Files", record with `tools/capview.py`, DOWN once, Y (RUN). Expected: diagnostics page,
+"= INFO CRC: OK", then the SA-1 test's 7 green bars. Then L+R+START for the browser, Gradius
+III, Kirby Super Star. Note which button is RUN, the PIC LINK LOG rows after each transfer and
+anything that differs from the notes.
+
+| file | size | CRC-32 file | ROM CRC-32 |
+|---|---|---|---|
+| `0 SA1 TEST.spc` (`build/snes_load/sa1test.spc`) | 0x18200 | AD3E85A3 | 8C5F7E54 |
+| `1 Gradius III.spc` (`gradius3.spc`) | 0x90200 | A70084ED | CD973979 |
+| `2 Kirby Super Star.spc` (`kirbyss.spc`) | 0x410200 | 40E67CE5 | 89D0F7DC |
+
 ## Next session: hwtest v5 (prepared 22 Oct)
 
 One hands-free run of ~3 minutes reads the SPC player's own screen and records what every
@@ -334,7 +350,8 @@ chord file was run (results below); the link part showed why nothing else could 
 | 09 | q-snes | green bar + 7 green test lines, white and cyan moving squares |
 | 10/11 | plltest / blinky | only if 05/06 show nothing |
 | 12 | q-hwtest | v5: the player's screen captured and shown (text, tile maps, bit images for tools/bitdump.py), a press every 4 s; answer 02 from the start; pads, SDRAM, audio as v4 (see Next session) |
-| 13 | q-snes_sdram | as 09, but the ROM runs from SDRAM |
+| 13 | q-snes_sdram | as 09, but the ROM runs from SDRAM (built for 16 bit/1024 columns/AB10 high: superseded by 14) |
+| 14 | q-snes_load | the player's file browser; RUN on "0 SA1 TEST.spc" loads the SA-1 test ROM into SDRAM chip B and runs it (`notes/snes-load.md`, "Console test") |
 | 00 | stock JB7.2 | restore |
 
 ## Results

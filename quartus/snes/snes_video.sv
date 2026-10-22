@@ -39,7 +39,9 @@ module snes_video #(
     input  wire        clk_vid,
     output reg  [7:0]  vr, vg, vb,     // colour, registered
     output reg         s0, s1, s2,     // HS/VS/DE in the order selected by `perm`
-    output reg  [2:0]  perm = 3'd0     // current sync order (0-5, table below)
+    output reg  [2:0]  perm = 3'd0,    // current sync order (0-5, table below)
+    output wire [10:0] cx,             // output pixel/line counters (an overlay's cycle 0;
+    output wire [9:0]  cy              // vr/vg/vb and the syncs follow 3 clocks later)
 );
     // ------------------------------------------------------------------ capture (clk_sys)
     reg        dc_d = 1'b0;
@@ -134,6 +136,8 @@ module snes_video #(
     reg [8:0]  col = 9'd0;                 // source column (0-511)
     reg [10:0] acc = 11'd0;                // horizontal phase accumulator
 
+    assign cx = hx;
+    assign cy = vy;
     wire line_end = (hx == H_TOT - 1);
     wire in_win = (vy >= LOCK_LINE - 1 - LOCK_WIN) && (vy <= LOCK_LINE - 1 + LOCK_WIN);
     wire ev_out = ev_vid && !in_win;                      // event outside the window

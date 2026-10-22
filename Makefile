@@ -311,6 +311,23 @@ sim-sdram-rom: $(SDROM_SIM)
 	  grep -E '^ *[0-9]+ (init|wrote|phase)|^model' build/sim/sdram_rom_$$n.log | sed 's/^ *[0-9]* /  /'; \
 	  grep -E '^(PASS|FAIL)' build/sim/sdram_rom_$$n.log; grep -q '^PASS' build/sim/sdram_rom_$$n.log; done
 
+# The 8-bit controller of quartus/snes_load (chip B alone, 512-column pages, 5 x clk_sys) against
+# the same timed model (COL_BITS 9): rise 4 (the built point) must work for board delays D_CLK
+# 1-6 ns (+ D_IN 1 ns), fall 3.5 and rise 5 must fail; it also checks the
+# second byte of each even-address read (the SA-1's 16-bit VBP word, taken one SA-1 cycle
+# later with sa1_vbp.patch) and the aux read port.
+SDROM8_SIM := quartus/snes_load/sim/tb_sdram_rom8.sv quartus/snes_sdram/sim/sdram_model.v \
+  quartus/snes_sdram/sim/ddio_model.v quartus/common/sdram_rom8.sv
+sim-sdram-rom8: $(SDROM8_SIM)
+	mkdir -p build/sim
+	@set -e; for c in 8:0:3.5:3.5 8:0:1.0:1.0 8:0:6.0:6.0 7:1:3.5:3.5 10:1:3.5:3.5; do \
+	  set -- $$(echo $$c | tr : ' '); h=$$1; x=$$2; d=$$3; o=$$4; n=$$h-$$d-$$o; \
+	  iverilog -g2012 -s tb_sdram_rom8 -P tb_sdram_rom8.CAPTURE_HALF=$$h -P tb_sdram_rom8.EXPECT_FAIL=$$x \
+	    -P tb_sdram_rom8.D_CLK=$$d -P tb_sdram_rom8.D_OUT=$$o -o build/sim/sdram_rom8_$$n.vvp $(SDROM8_SIM); \
+	  vvp -n build/sim/sdram_rom8_$$n.vvp > build/sim/sdram_rom8_$$n.log; \
+	  grep -E '^ *[0-9]+ (init|wrote|64|phase)|^model' build/sim/sdram_rom8_$$n.log | sed 's/^ *[0-9]* /  /'; \
+	  grep -E '^(PASS|FAIL)' build/sim/sdram_rom8_$$n.log; grep -q '^PASS' build/sim/sdram_rom8_$$n.log; done
+
 LINK_LD_SIM := quartus/snes_sdram/sim/tb_link_loader.sv quartus/snes_sdram/sim/sdram_model.v \
   quartus/snes_sdram/sim/ddio_model.v quartus/common/sdram_rom.sv quartus/common/link_loader.sv
 sim-link-loader: $(LINK_LD_SIM)
@@ -349,10 +366,102 @@ sim-snes-sdram: $(SNES_SDRAM_OBJ)/Vtb build/snes/sa1test.hex
 	  cat build/sim/snes_sdram.log; \
 	  for f in build/sim/snes_sdram-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
 
+# SNES + SA-1 core that loads its ROM over the PIC32 link (quartus/snes_load, notes/snes-load.md):
+# the diagnostics page template and the console font are built into the core.
+quartus/snes_load/snes_load.rbf: build/snes_load/diag.hex build/hwtest/font.hex build/snes_load/SA1.vhd
+# SA1.vhd with the variable-length bit processing taking its ROM word one SA-1 cycle later
+# (quartus/snes_load/sa1_vbp.patch; the 8-bit ROM delivers a word's high byte one memory cycle
+# after the low one, notes/snes-load.md).
+build/snes_load/SA1.vhd: $(SNES_UP)/chip/SA1/SA1.vhd quartus/snes_load/sa1_vbp.patch
+	mkdir -p build/snes_load
+	cp $< $@
+	patch -s $@ < quartus/snes_load/sa1_vbp.patch
+build/snes_load/diag.hex: quartus/snes_load/diag.txt tools/mkscreen.py
+	mkdir -p build/snes_load
+	python3 -I tools/mkscreen.py $< $@
+
+# ROMs wrapped for the SPC player (tools/rom2spc.py): the SA-1 test ROM, and ROMs from the SD
+# card backup (SNES_ROMS) when they are there.
+SNES_ROMS ?= $(HOME)/scratch/sd-backup-2026-10-21/SNES
+LOAD_SPCS := build/snes_load/sa1test.spc
+build/snes_load/sa1test.spc: build/snes/sa1test.sfc tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py $< $@ --title "SA1 TEST"
+build/snes_load/gradius3.spc: tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Gradius III (U) [!].smc" $@ --title "GRADIUS III"
+build/snes_load/kirbyss.spc: tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Kirby Super Star (U) [!].smc" $@ --title "KIRBY SUPER STAR"
+load-spcs: build/snes_load/sa1test.spc build/snes_load/gradius3.spc build/snes_load/kirbyss.spc
+.PHONY: load-spcs
+
+# End-to-end simulation of quartus/snes_load (notes/snes-load.md, "Simulation"): Verilator, the
+# GHDL netlists of sim-snes, the cycle SDRAM model with 512-column pages, a PIC32 stand-in on the
+# link (start-up, status poll, the player's browser screen and UI loop, the file at 1.7 MB/s)
+# and a pad (DOWN, RUN, later L+R+SELECT) from C++ (quartus/snes_load/sim/tb_snes_load.cpp).
+# Frames: build/sim/snes_load-NN.png, report build/sim/snes_load.log (last line PASS/FAIL).
+# sim-snes-load-gradius: the Gradius III file (LoROM header detection, mapper, verify; the game
+# runs a few frames, no pass criterion on its picture).
+SNES_LOAD_SIM ?= $(HOME)/scratch/snes-load/sim
+SNES_LOAD_FRAMES ?= 28
+SNES_LOAD_SV := quartus/snes_load/sim/tb.sv quartus/snes_load/snes_load_top.sv \
+  quartus/snes_sdram/snes_sdram_core.sv quartus/snes/snes_video.sv quartus/common/i2s_out.sv \
+  quartus/common/sdram_rom8.sv quartus/common/link_ui.sv quartus/common/rom_loader.sv \
+  quartus/common/pad_poll.sv quartus/common/overlay.sv quartus/snes_sdram/sim/sim_models.v \
+  quartus/snes_sdram/sim/ddio_model.v quartus/snes_sdram/sim/sdram_cyc.v \
+  quartus/snes_load/sim/sim_models.v $(SNES_UP)/main.v
+
+# SA1Map netlist with the VBP patch (the other netlists are sim-snes's)
+SNES_LOAD_VHDL := $(subst $(SNES_SIM)/upstream,$(SNES_LOAD_SIM)/upstream,$(SNES_VHDL_SIM))
+$(SNES_LOAD_SIM)/vlog/SA1Map.v: $(SNES_SIM)/vlog/.stamp quartus/snes_load/sa1_vbp.patch
+	rm -rf $(SNES_LOAD_SIM)/upstream $(SNES_LOAD_SIM)/work $(SNES_LOAD_SIM)/vlog
+	mkdir -p $(SNES_LOAD_SIM)/work $(SNES_LOAD_SIM)/vlog
+	cp -r $(SNES_SIM)/upstream $(SNES_LOAD_SIM)/upstream
+	cd $(SNES_LOAD_SIM)/upstream && patch -s -p0 < $(CURDIR)/quartus/snes_load/sa1_vbp.patch
+	cd $(SNES_LOAD_SIM)/work && $(SNES_GHDL) -a $(SNES_GA) $(abspath $(SNES_LOAD_VHDL))
+	cd $(SNES_LOAD_SIM)/work && $(SNES_GHDL) synth $(SNES_GA) --latches --out=verilog SA1Map \
+	  > ../vlog/SA1Map.v 2> ../vlog/SA1Map.log || { tail ../vlog/SA1Map.log; exit 1; }
+	python3 -I quartus/snes/sim/ghdl_fix.py $(SNES_LOAD_SIM)/vlog/SA1Map.v SA1Map_ SA1Map $(SNES_UP)/main.v
+
+$(SNES_LOAD_SIM)/obj/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_LOAD_SIM)/vlog/SA1Map.v $(SNES_LOAD_SV) \
+    quartus/snes_load/sim/tb_snes_load.cpp build/snes_load/diag.hex build/hwtest/font.hex
+	mkdir -p $(SNES_LOAD_SIM)
+	verilator --cc --exe --build -j 4 -O2 --top-module tb +1364-2005ext+v -Wno-fatal -Wno-lint -Wno-style \
+	  -Wno-MULTIDRIVEN -Wno-UNOPTFLAT -Wno-COMBDLY --x-assign fast --x-initial fast \
+	  -CFLAGS -O1 -Mdir $(SNES_LOAD_SIM)/obj -o Vtb \
+	  -GTMPL_HEX='"$(CURDIR)/build/snes_load/diag.hex"' -GFONT_HEX='"$(CURDIR)/build/hwtest/font.hex"' \
+	  $(SNES_LOAD_SV) $(SNES_SIM)/vlog/SNES.v $(SNES_LOAD_SIM)/vlog/SA1Map.v \
+	  $(SNES_SIM)/vlog/DSP_LHRomMap.v $(abspath quartus/snes_load/sim/tb_snes_load.cpp) \
+	  > $(SNES_LOAD_SIM)/verilator.log 2>&1 || { tail -30 $(SNES_LOAD_SIM)/verilator.log; exit 1; }
+
+sim-snes-load: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/sa1test.spc
+	mkdir -p build/sim
+	rm -f build/sim/snes_load-*.p?m
+	$(SNES_LOAD_SIM)/obj/Vtb $(SNES_LOAD_FRAMES) build/sim/snes_load- build/snes_load/sa1test.spc \
+	  > build/sim/snes_load.log; s=$$?; cat build/sim/snes_load.log; \
+	  for f in build/sim/snes_load-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
+
+# sim-snes-load-kirby: Kirby Super Star (4 MB SA-1): the big transfer, read-back and mapper (~10 min).
+sim-snes-load-kirby: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/kirbyss.spc
+	mkdir -p build/sim
+	rm -f build/sim/snes_load_kss-*.p?m
+	TB_FAST=1 TB_GAME=1 TB_TYPE=60 TB_MASK=3FFFFF $(SNES_LOAD_SIM)/obj/Vtb 120 build/sim/snes_load_kss- \
+	  build/snes_load/kirbyss.spc > build/sim/snes_load_kss.log; s=$$?; tail -4 build/sim/snes_load_kss.log; \
+	  for f in build/sim/snes_load_kss-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
+
+sim-snes-load-gradius: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/gradius3.spc
+	mkdir -p build/sim
+	rm -f build/sim/snes_load_g3-*.p?m
+	TB_FAST=1 TB_GAME=1 TB_TYPE=00 TB_MASK=07FFFF $(SNES_LOAD_SIM)/obj/Vtb 70 build/sim/snes_load_g3- \
+	  build/snes_load/gradius3.spc > build/sim/snes_load_g3.log; s=$$?; cat build/sim/snes_load_g3.log; \
+	  for f in build/sim/snes_load_g3-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
+
 FORCE:
 
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader
+.PHONY: all clean FORCE sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader \
+  sim-sdram-rom8 sim-snes-load sim-snes-load-gradius sim-snes-load-kirby
 .SECONDARY:

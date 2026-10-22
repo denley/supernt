@@ -24,7 +24,10 @@ module sdram_cyc #(
     parameter integer WLO = 7, WHI = 8,
     parameter integer T_RCD = 2, T_RAS = 4, T_RP = 2, T_RC = 6, T_RRD = 2, T_WR = 2, T_MRD = 2,
     parameter integer REF_MAX = 1339,            // 15.6 us at 85.77 MHz
-    parameter [11:0]  MRS_EXPECT = 12'h037
+    parameter [11:0]  MRS_EXPECT = 12'h037,
+    // 10: the x16 pair as built for (1024 columns); 9: chip B as it is (512 columns per page,
+    // quartus/snes_load), memory index {bank, row, column[8:0]}
+    parameter integer COL_BITS = 10
 ) (
     input  wire        clk,
     input  wire        cs_n, ras_n, cas_n, we_n,
@@ -82,6 +85,10 @@ module sdram_cyc #(
         end
     endtask
 
+    localparam [9:0] CMASK = (10'd1 << COL_BITS) - 10'd1;
+    function [23:0] mi(input [1:0] b_, input [11:0] r_, input [9:0] c_);
+        mi = COL_BITS == 10 ? {b_, r_, c_} : {1'b0, b_, r_, c_[8:0]};
+    endfunction
     wire [3:0] c = {cs_n, ras_n, cas_n, we_n};
     integer k;
     always @(posedge clk or negedge clk) begin
@@ -90,12 +97,12 @@ module sdram_cyc #(
             ce = ce + 1;
             if (c != 4'b0111 && !cs_n) begin rd_on = 1'b0; wr_on = 1'b0; end   // burst ends
             if (wr_on) begin
-                mem[{bb, row[bb], bc}] = oe_fpga ? dq_fpga : 16'hBAD0;
-                t_wd[bb] = ce; bc = bc + 10'd1; n_wr = n_wr + 1;
+                mem[mi(bb, row[bb], bc)] = oe_fpga ? dq_fpga : 16'hBAD0;
+                t_wd[bb] = ce; bc = (bc + 10'd1) & CMASK; n_wr = n_wr + 1;
             end
             if (rd_on) begin
-                produce(rd_h0, rd_k, mem[{bb, row[bb], bc}]);
-                rd_k = rd_k + 1; bc = bc + 10'd1;
+                produce(rd_h0, rd_k, mem[mi(bb, row[bb], bc)]);
+                rd_k = rd_k + 1; bc = (bc + 10'd1) & CMASK;
             end
             if (!cs_n) case (c[2:0])
                 3'b011: begin                                // ACT
@@ -113,15 +120,16 @@ module sdram_cyc #(
                     if (!open_b[ba]) err("READ/WRITE to an idle bank");
                     if (ce - t_act[ba] < T_RCD) err("tRCD");
                     if (a[10]) err("auto precharge");
-                    bb = ba; bc = a[9:0];
+                    bb = ba; bc = a[9:0] & CMASK;
+                    if (COL_BITS < 10 && a[9]) err("column bit 9 set (512-column page)");
                     if (c[0]) begin
                         rd_on = 1'b1; rd_h0 = hc - 1; rd_k = 1;
-                        produce(rd_h0, 0, mem[{ba, row[ba], a[9:0]}]);
-                        bc = bc + 10'd1; n_rd = n_rd + 1;
+                        produce(rd_h0, 0, mem[mi(ba, row[ba], bc)]);
+                        bc = (bc + 10'd1) & CMASK; n_rd = n_rd + 1;
                     end else begin
                         wr_on = 1'b1;
-                        mem[{ba, row[ba], a[9:0]}] = oe_fpga ? dq_fpga : 16'hBAD0;
-                        t_wd[ba] = ce; bc = bc + 10'd1; n_wr = n_wr + 1;
+                        mem[mi(ba, row[ba], bc)] = oe_fpga ? dq_fpga : 16'hBAD0;
+                        t_wd[ba] = ce; bc = (bc + 10'd1) & CMASK; n_wr = n_wr + 1;
                     end
                 end
                 3'b110: begin end                            // BST

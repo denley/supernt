@@ -13,7 +13,8 @@
 // Environment:
 //   TB_ROM=<hex>        another 8 KB boot ROM image ($readmemh format)
 //   TB_SFC=<file>       preload the SDRAM model with this ROM image instead of the boot copy
-//                       (boot_len = 0); TB_MASK=<hex> sets the core's ROM mask (default 7FFF)
+//                       (boot_len = 0); TB_MASK=<hex> sets the core's ROM mask (default 7FFF),
+//                       TB_TYPE=<hex> its ROM_TYPE (default 60 = SA-1; 00 LoROM)
 //   TB_WIN=lo,hi        read-data window of the SDRAM model in half cycles after the READ edge
 //                       (default 7,8; the controller captures at CAPTURE_HALF)
 //   TB_DEBUG=1          ring-buffer details
@@ -62,6 +63,7 @@ int main(int argc, char **argv) {
         r->tb__DOT__dut__DOT__boot_len = 0;
         unsigned mask = getenv("TB_MASK") ? strtoul(getenv("TB_MASK"), nullptr, 16) : 0x7fff;
         r->tb__DOT__dut__DOT__rom_mask = mask;
+        if (getenv("TB_TYPE")) r->tb__DOT__dut__DOT__rom_type = strtoul(getenv("TB_TYPE"), nullptr, 16);
         printf("SDRAM preloaded: %u words from %s, boot copy skipped, ROM mask %06x\n", n, sfc, mask);
     }
     if (const char *w = getenv("TB_WIN")) {
