@@ -401,3 +401,9 @@ chord file was run (results below); the link part showed why nothing else could 
     address 0x0000_FF00 + file offset** (so the SPC RAM at file offset 0x100 lands at 0x1_0000),
     in runs of 0x1000 at 0xFF00 then 0x2000 each and 0x1200 at 0x1EF00, all within 36 ms
     (T 0x2F13–0x2F37); every run's CRC matches `build/test-chord.spc`.
+  - v6b with `Super Nt big 1MB.spc` in place of the chord (the browser sorts names
+    case-sensitively, so it took the chord's row): **the whole 1 MB arrived**, again at
+    0x0000_FF00 + file offset, in 0x3000-byte runs (last run 0x10DF00, 0x2000 bytes), in about
+    0.6 s (T 0x2F.. – 0x3164). Five runs checked against `build/test-big-1m.spc`, all match. So
+    files much larger than an SPC are sent whole as long as the PIC accepts them as SPCs
+    (header check: a .txt gave "ERROR: NOT AN SPC!"); a ROM can be loaded wrapped in an SPC.
