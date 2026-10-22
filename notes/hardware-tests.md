@@ -385,3 +385,19 @@ chord file was run (results below); the link part showed why nothing else could 
     the status of a reconfiguration block for the video PLL, same byte at every `0x2xx4_xxxx`
     address, idle value 0x03 or 0x02 depending on one ambiguous clear polarity. → hwtest v2.
 
+
+- 22 Oct 2026, hwtest v5 (exploring presses) and v6/v6b (scripted presses), HDMI capture dongle
+  on homebox (`tools/capview.py`): **the SPC file arrives over the link.**
+  - v5's screen capture (`tools/bitdump.py`) showed the player's UI: a file browser opening in
+    `0:/SPC` (GO BACK, SPC README.TXT, SUPER NT TEST CHORD.SPC, SPC2_FILE_SPECIFICATION_V1.TXT;
+    cursor = attribute 0x60, on GO BACK), footer NAVIGATE/PAGE, RUN/MENU, BACK/BACK TO GAME;
+    START = MENU (Video/Audio/System/About/Save-Clear settings); pad bit 1 (our "Y") =
+    RUN/CONFIRM, bit 0 (our "B") = BACK (up a folder), SELECT = CANCEL in the menu; A, X, L, R,
+    LEFT, RIGHT did nothing there. v5's exploring toggled "-3dB output cut" in the Audio menu and
+    then cancelled (not saved); later presses in the root folder lost the picture.
+  - v6: DOWN, DOWN, RUN with 0.5 s presses: the first DOWN auto-repeated, RUN hit the .txt:
+    "ERROR: NOT AN SPC!" (the PIC checks the file).
+  - v6b (0.1 s presses): RUN on the chord; the PIC wrote the **whole file verbatim to link
+    address 0x0000_FF00 + file offset** (so the SPC RAM at file offset 0x100 lands at 0x1_0000),
+    in runs of 0x1000 at 0xFF00 then 0x2000 each and 0x1200 at 0x1EF00, all within 36 ms
+    (T 0x2F13–0x2F37); every run's CRC matches `build/test-chord.spc`.
