@@ -35,3 +35,19 @@ unassigned I/Os anywhere, which on the board could drive a random net). The open
 same before nextpnr with `tools/checkqsf.py` (every top port bit needs a `.qsf` location).
 Added 21 Oct 2026 after a hwtest build briefly lacked its SDRAM pin block (caught, never built
 into a `.cor`).
+
+## Power-up values
+
+- `quartus/common/supernt.tcl` sets `ALLOW_POWER_UP_DONT_CARE OFF`, so registers power up at
+  their Verilog initial values (hwtest v2 lost two handshake flags to the default).
+- **Quartus ignores initial values written in an ANSI port declaration** (`output reg x = 1`):
+  synthesis warns "Net ... has no driver or initial value, using a default initial value '0'"
+  (10030) and treats the register as powering up 0. Found 22 Oct 2026 from hwtest v4/v4b on the
+  console: `link_logger`'s `cand = FIRST_CAND` and `vpress`'s `btn = 4'hF` came up 0 (the
+  map report's "Inverted Register Statistics", where NOT-gate push-back registers are listed,
+  had none of them; `sdram_test`'s `sd_cs_n = 1'b1` was reported "stuck at GND"). Rule: a
+  register that must power up nonzero is declared inside the module (`reg q = v;` plus
+  `assign out = q;`), and important ones also get an explicit post-configuration load
+  (`link_logger`: 256 clocks loading FIRST_CAND). Zero initial values in port declarations are
+  harmless. Check: `rg "output\s+reg[^;]*=\s*[^0;,]" quartus/` lists the candidates (only zero
+  values such as `8'd0` may remain).

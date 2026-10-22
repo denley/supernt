@@ -106,10 +106,10 @@ module sdram_rom #(
 
     // SDRAM pins
     output wire        sd_clk,
-    output reg         sd_cs_n = 1'b1,
-    output reg         sd_ras_n = 1'b1,
-    output reg         sd_cas_n = 1'b1,
-    output reg         sd_we_n = 1'b1,
+    output wire        sd_cs_n,         // command pins: from sd_cmd (NOP-high at power-up)
+    output wire        sd_ras_n,
+    output wire        sd_cas_n,
+    output wire        sd_we_n,
     output reg  [11:0] sd_a = 12'd0,
     output reg  [1:0]  sd_ba = 2'd0,
     input  wire [15:0] sd_dq_in,
@@ -186,8 +186,12 @@ module sdram_rom #(
     reg         aux_rd = 1'b0;          // the read in progress is an aux read
     reg  [3:0]  age = 4'd0;             // cycles a read request has been waiting
 
+    // Quartus ignores initial values in ANSI port declarations (notes/quartus.md), so the
+    // command register that must power up deselected (1111) is internal.
+    reg [3:0] sd_cmd = 4'b1111;
+    assign {sd_cs_n, sd_ras_n, sd_cas_n, sd_we_n} = sd_cmd;
     task cmd(input [3:0] c);
-        {sd_cs_n, sd_ras_n, sd_cas_n, sd_we_n} <= c;
+        sd_cmd <= c;
     endtask
 
     always @(posedge clk) begin

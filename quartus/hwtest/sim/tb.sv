@@ -12,9 +12,13 @@
 // candidate that got fixed, the virtual press that preceded the file and the logger's merged
 // entries (the UI loop must take one entry, the oldest and the newest entries survive the wrap).
 // The core runs with its hwtest defaults (first candidate 1 = 02, I2S only, tone 24 dB down)
-// unless +cand0 starts the answer at candidate 0 (the emulated PLL). The x8 SDRAM pair is sdram_model.v with chip B's DQM on AB10 and chip A's on the
+// unless +cand0 starts the answer at candidate 0 (the emulated PLL). As on the console with
+// v4/v4b (Quartus dropped the port declaration's initial value), the candidate register is 0
+// right after configuration; the core's post-configuration init must load FIRST_CAND.
+// The file counts once a 1 KB run (FILE_RUN) goes outside the UI's blocks. The x8 SDRAM pair is sdram_model.v with chip B's DQM on AB10 and chip A's on the
 // constant pin tie3[5]. Renders one frame per page (hwtest-P-N.ppm, page time = 1 frame) and
-// records the I2S stream (i2s.txt: "lrclk data mode" per BCLK rising edge).
+// records the I2S stream (i2s.txt: "lrclk data mode" per BCLK rising edge). Only the first 4
+// pages are rendered here (iverilog is slow); make sim-screen renders every page.
 // Plusargs: +want=HH (byte the PIC waits for; with a value candidate 1 doesn't give, the
 // candidate stepping must find it), +cand0 (start at candidate 0, the emulated PLL), +noh16 (no
 // clock on H16: the PLL never locks, the emulated status says 01 and the stepping must move on
@@ -54,8 +58,9 @@ module tb;
         else if (pj13 && !pj13_d) pad_sh <= {1'b1, pad_sh[31:1]};
     end
     top #(.SCREEN_HEX("../hwtest/screen.hex"), .FONT_HEX("../hwtest/font.hex"),
-          .SINE_HEX("../hwtest/sine.hex"), .PAGE0_FRAMES(10'd1), .PAGE_FRAMES(10'd1),
-          .STEP_US(150), .SD_ROWS(12'd3)) dut (
+          .SINE_HEX("../hwtest/sine.hex"), .HALF_SEC_FRAMES(0),
+          .STEP_US(150), .SD_ROWS(12'd3), .VP_WAIT_US(300), .VP_PRESS_US(100), .VP_GAP_US(1000),
+          .VP_DUMP_US(50), .VP_DUMP_END(20), .QUIET_US(200), .FILE_RUN(1024)) dut (
         .clk(clk), .h16(h16), .pclk(pclk), .s0(s0), .s1(s1), .s2(s2), .ch1(ch1), .ch2(ch2), .ch3(ch3),
         .aud_mclk(am), .aud_bclk(ab), .aud_lrclk(al), .aud_sdata(ad),
         .link_a(la), .link_nrd(nrd), .link_nwr(nwr), .link_d(ld),
@@ -70,10 +75,6 @@ module tb;
     defparam dut.link.LOCK_BYTES = 512;
     defparam dut.link.POLL_READS = 20;
     defparam dut.pads.START_US = 1000;
-    defparam dut.vp.WAIT_US = 300;        // virtual presses: wait 300 us, 100 us on, 200 us off
-    defparam dut.vp.PRESS_US = 100;
-    defparam dut.vp.GAP_US = 200;
-    defparam dut.vp.FILE_BYTES = 2048;
 
     task wr(input [2:0] a, input [7:0] d);
         begin
@@ -135,7 +136,8 @@ module tb;
         if (!$value$plusargs("want=%h", want)) want = 8'h02;
         if ($test$plusargs("noframes")) noframes = 1;
         if ($test$plusargs("noh16")) h16_on = 0;
-        if ($test$plusargs("cand0")) begin #1 dut.link.cand = 4'd0; end
+        #1 dut.link.cand_q = 4'd0;                                 // v4/v4b's power-up value
+        if ($test$plusargs("cand0")) begin wait (dut.link.por_done); #1 dut.link.cand_q = 4'd0; end
         #2000;
         nrd = 1;                                                   // PIC port set up
         #2000;
@@ -264,7 +266,7 @@ module tb;
         if (s0 && !pvs) begin
             if (frame > 0) $fclose(f);
             frame = frame + 1;
-            if (frame == 10) begin
+            if (frame == 5) begin
                 $fclose(fi);
                 $display("done, %0d I2S bits; SDRAM passes %0d; pad raw %h, held flags %h (expect FFFF0802, 802)",
                          nbits, dut.sdram.passes, dut.praw0, dut.st[23]);
@@ -276,7 +278,7 @@ module tb;
                          dut.emu.out_per_ms);
                 $finish;
             end
-            $sformat(name, "hwtest-%0d-%0d.ppm", dut.page, frame);
+            $sformat(name, "hwtest-%0d-%0d.ppm", dut.dps, frame);
             f = $fopen(name, "w");
             $fwrite(f, "P3\n1280 720\n255\n");
         end

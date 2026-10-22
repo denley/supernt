@@ -166,7 +166,8 @@ PLL_RECONFIG_IP = $(QUARTUS_ROOT)/../ip/altera/altera_pll_reconfig
 HWTEST_SIM_SRC = quartus/hwtest/sim/tb.sv quartus/hwtest/sim/models.v quartus/hwtest/sim/sdram_model.v \
   quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/i2s_test.sv \
   quartus/common/link_logger.sv quartus/common/pad_test.sv quartus/common/sdram_test.sv \
-  quartus/common/pll_emul.sv quartus/common/vpress.sv $(PLL_RECONFIG_IP)/altera_pll_reconfig_top.v \
+  quartus/common/pll_emul.sv quartus/common/vpress.sv quartus/common/ui_capture.sv \
+  quartus/common/gfx_render.sv $(PLL_RECONFIG_IP)/altera_pll_reconfig_top.v \
   $(PLL_RECONFIG_IP)/altera_pll_reconfig_core.v $(PLL_RECONFIG_IP)/altera_pll_reconfig_mif_reader.v \
   $(QUARTUS_ROOT)/libraries/megafunctions/altera_std_synchronizer.v
 sim-hwtest: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
@@ -183,6 +184,26 @@ sim-hwtest: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
 	cd build/sim && vvp -n hwtest.vvp +want=00 +noframes > hwtest-want00.log && grep -v '^log ' hwtest-want00.log | tail -3
 	grep -q '^LINK PASS' build/sim/hwtest-want00.log
 	python3 -I quartus/hwtest/sim/check.py build/sim 4 0
+
+# Screen views of quartus/hwtest (quartus/hwtest/sim/tb_screen.sv), with Verilator (iverilog
+# needs ~2 min per frame here, Verilator ~1 s): a PIC32 stand-in writes a known font, screen and
+# blocks, presses arrive every 60 ms, one frame per display page (build/sim/screen-PP-FFF.png);
+# the bit images are decoded with tools/bitdump.py and checked against the capture CRCs
+# (quartus/hwtest/sim/check_screen.py). The SDRAM test, video-PLL emulation and audio are
+# stubbed (quartus/hwtest/sim/stubs.v).
+SCREEN_FRAMES ?= 56
+SCREEN_SRC = quartus/hwtest/sim/tb_screen.sv quartus/hwtest/sim/stubs.v quartus/hwtest/sim/models.v \
+  quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/link_logger.sv \
+  quartus/common/pad_test.sv quartus/common/vpress.sv quartus/common/ui_capture.sv \
+  quartus/common/gfx_render.sv
+sim-screen: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
+	mkdir -p build/sim
+	verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD \
+	  --top-module tb -Mdir build/verilator/screen -o screen_v $(SCREEN_SRC) > build/sim/screen-verilator.log 2>&1 \
+	  || { grep -A3 %Error build/sim/screen-verilator.log; exit 1; }
+	rm -f build/sim/screen-*.ppm build/sim/screen-*.png build/sim/screen-*.jpg
+	cd build/sim && ../verilator/screen/screen_v +frames=$(SCREEN_FRAMES) > screen.log; grep -v '^\(history\|press\) ' screen.log | tail -6
+	python3 -I quartus/hwtest/sim/check_screen.py build/sim
 
 # Unit simulation of quartus/common/sdram_test.sv (quartus/hwtest/sim/tb_sdram.sv).
 sim-sdram:
@@ -333,5 +354,5 @@ FORCE:
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE sim-snes sim-hwtest sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader
+.PHONY: all clean FORCE sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader
 .SECONDARY:

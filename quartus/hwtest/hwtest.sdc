@@ -3,6 +3,10 @@ create_clock -name clk -period 13.468 [get_ports clk]
 create_clock -name h16 -period 13.468 [get_ports h16]
 derive_pll_clocks
 derive_clock_uncertainty
+# 50 ps of extra hold margin inside the board clock domain: v5's first build missed hold by
+# 1 ps in the fast corner (a register into an M10K data input, 0.4 ns clock skew), so the
+# fitter's hold fixing gets a target with some room.
+set_clock_uncertainty -add -hold -enable_same_physical_edge -from [get_clocks clk] -to [get_clocks clk] 0.05
 
 # The audio clock (12.288 MHz PLL), H16 and the video-PLL stand-in's outputs only exchange slow
 # status bits (synchronisers, Gray-coded counters) with the board clock domain.

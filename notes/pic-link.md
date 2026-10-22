@@ -31,7 +31,9 @@ read and write strobes, 3 address lines), sampled by the FPGA at 42.686 MHz:
   then runs the **SPC player's UI loop** (every ~32 ms: 01 → `0x1000_D120`, read 2 bytes at
   `0x2000_0000` and at `0x2001_0000`, twice). Those are the pad 1 buttons
   (`notes/controllers.md`, "Link registers"); the file didn't come within 150 s while v3
-  answered 00 there (section "After hwtest v3").
+  answered 00 there (section "After hwtest v3"). With the pad answered (v4), button presses
+  make the PIC redraw a 4 KB screen of 2-byte cells at `0x1018_0000` (section "After hwtest
+  v4 / v4b"); the file still didn't come.
 - The 21 Oct capture contains only writes (U21 never went low). In true bit order they are a register
   set-up sequence at `0x1000_xxxx`/`0x1010_xxxx`/`0x111F_8100` followed by repeated writes to
   `0x1000_9018`/`0x1000_D218` whose data runs FF … FF, EE, DD, CC, … 11, 00. Nothing in it is the
@@ -328,6 +330,30 @@ presses once the UI has waited 10 s: A, START, X, Y, L, R, UP, DOWN, LEFT, RIGHT
 preceded it). Reads of `0x2000`/`0x2001` are counted, not logged, and the log keeps its first
 512 entries plus a ring of the newest 512, so the file transfer shows on pages 2 and 3.
 
+### After hwtest v4 / v4b (22 Oct, fourth and fifth console runs)
+
+(`notes/hardware-tests.md`, "hwtest v4 / v4b results"; transcription in
+`notes/buslog-2026-10-22-hwtest.md`, fourth part.)
+
+- Both runs still began at candidate 0 (03 for 5 s, then 02, the PIC moving on at once): the
+  candidate register's initial value sat in an ANSI port declaration, which Quartus ignores
+  (`notes/quartus.md`, "Power-up values"). 02 02 stays confirmed as the answer.
+- With the pad registers answered and virtual presses, the player reacts: **the PIC redraws a
+  4 KB screen at `0x1018_0000`** (a full 0x1000-byte run) after START, DOWN, Y, UP, SELECT
+  (back to the first screen) and B; A, RIGHT, LEFT, X, L, R changed nothing on those screens.
+  Partial updates are bracketed by `0x1000_D129` = 01 / 00: after B, 16 bytes at
+  `0x1018_0DE8` starting with 'T', then `20 00` x 8 at `0x0DE8` and x 4 at `0x0E6C`. So the
+  screen is **a map of 2-byte cells, character (ASCII) then attribute, 64 cells per 128-byte
+  row, 32 rows**; `0x0DE8` = row 27, cells 52-59, ending at cell 60 = 1920 / 32 [likely]. The
+  8 KB at `0x1006_0000` (written once after the poll, first byte ED) is then most likely the
+  glyph set (256 x 32 bytes: 16x16 at 1 bpp, or 8x16 at 2 bpp) and the 0x300 bytes at
+  `0x1001_3000` a palette (256 x RGB?) [guess]. `0x1000_D110`/`D114` ramp down (a fade) after
+  START (v4) and SELECT (v4b).
+- No .spc data arrived in either run (all big runs are the UI blocks above).
+- hwtest v5 captures these regions and shows them (text views, tile maps in several glyph
+  formats, bit images decoded by `tools/bitdump.py`), with one press every 4 s and a screen
+  dump before each, and counts only writes outside the UI's regions as "the file".
+
 ## The capture, decoded
 
 Logger events `S:DD+TT`. S = {AB20 AA20 AA19 U21} = {A2 A1 A0 /RD}; the cycle 3 → 9 → B → 5 → 1
@@ -396,8 +422,9 @@ Also drive OE on /RD with a constant (e.g. 0xA5) to see whether and when the PIC
 - What the open-drain group read back at `0x01xx_xxxx` is for, and the meaning of the other
   `0x2xxx_xxxx` status registers.
 - Why the emulated reconfiguration IP's waitrequest stayed 1 on the FPGA (v3).
-- What `0x1000_D120` = 01 (once per UI loop) and the post-poll blocks (`0x1006_0000`,
-  `0x1001_3000`, `0x1018_0000`) are; which button makes the player send the file (hwtest v4).
+- What `0x1000_D120` = 01 (once per UI loop) and `0x1000_D129` are; the formats of the
+  post-poll blocks (`0x1006_0000` glyphs?, `0x1001_3000` palette?; `0x1018_0000` is the
+  screen, 2-byte cells); which button (or menu) makes the player send the file (hwtest v5).
 - Whether the PIC waits on P14 or another pin.
 
 ## Tool (`tools/netlist.py`)

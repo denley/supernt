@@ -35,7 +35,157 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
-## Next session: hwtest v4 (prepared 22 Oct)
+## Next session: hwtest v5 (prepared 22 Oct)
+
+One hands-free run of ~3 minutes reads the SPC player's own screen and records what every
+virtual press does to it. v4/v4b results below.
+
+What v5 changes (everything else as v4b: same 138 I/Os and pin settings, I2S audio 24 dB down,
+SDRAM hypotheses, ring log):
+
+- **FIRST_CAND fixed**: the answer starts at 02 (v4/v4b started at candidate 0 and stepped
+  after 5 s, see the results). Expected: "answer 02 candidate 1 steps 00", the PIC moves on at
+  ~0.4 s.
+- **The player's screen is captured** (`quartus/common/ui_capture.sv`): copies of every write
+  to `0x1018_0000` (4 KB screen), `0x1006_0000` (8 KB, font?), `0x1001_3000` (0x300, palette?),
+  the register blocks (`0x111F_81xx`, `0x1010_00xx`, `0x1000_D1xx/05xx/90xx/D2xx/00xx/80xx/C2xx/
+  F0xx/D0xx`, last value per byte) and `0x1017_0000-3FFF`, in a 32 KB capture space (screen
+  0x0000, font 0x1000, palette 0x3000, registers 0x3400-0x3EFF, 0x1017 block 0x4000). A
+  scanner keeps CRC-32s per 4 KB block and of the logged regions, logs every settled screen
+  change (no write for 30 ms; time, CRC, the virtual press current then) and, per press, the
+  screen CRC just before the next press.
+- **Views** (pages listed below): the screen as text in our font (2-byte cells, character
+  first, 64 per 128-byte row, as v4b's partial writes show; also 1 byte per character), as
+  tile maps drawn with the captured 8 KB in nine glyph formats (`quartus/common/gfx_render.sv`;
+  the glyph is the cell's first byte), glyph sheets of the 8 KB, a hex dump of the first 0x540
+  bytes, and **bit images** of each 4 KB block that `tools/bitdump.py` decodes from the video
+  (every screen state, the font and the rest, byte exact; checked on simulated frames and mock
+  photos with keystone, barrel distortion, blur, noise, uneven light and JPEG).
+- **Virtual presses** (`quartus/common/vpress.sv`): from 4 s after the UI loop starts, one press
+  every 4 s (0.5 s pressed), 48 in this order: A, START, START,
+  A, DOWN, DOWN, A, UP, A, RIGHT, A, LEFT, Y, Y, X, X, L, R, SELECT, START, SELECT, B, B, A,
+  DOWN, START, B, RIGHT, RIGHT, START, DOWN, A, START, UP, UP, A, START, Y, A, SELECT, X, A, L,
+  START, R, START, B, START (~44 fit in 3 minutes). From 2.95 s to 3.95 s after each press
+  starts (and in the second before the first press), page 1D (the screen's bit image) is
+  shown and the page cycle pauses. Pressing stops only for the file: a single write run of
+  16 KB outside the UI's blocks (`0x1018`, `0x1006`, `0x1017`), or 64 KB of writes outside all
+  known UI regions; the press before it is recorded ("file:" line). (v4b stopped after 32 KB of any writes, i.e. eight screen redraws.)
+
+Pages (numbers in hex as the screen shows them; cycle ~101 s plus 1 s per press):
+
+| page | s | view |
+|---|---|---|
+| 00 | 5 | overview (new line SCREEN: CRC, changes, last change T, bytes written, bytes outside the UI regions) |
+| 01 | 4 | screen changes: CRC now, font/palette/0x1017 CRCs (expected B5CFAF0C, D0C0DF2A, B1883CCD), the newest 18 changes (T, CRC, press #, button) |
+| 02, 03 | 3 | screen as text, 2-byte cells (the character byte), rows 00+ / 0B+; codes 80-FF yellow, 01-1F cyan as '@' + code |
+| 13, 14, 15, 16 | 3 | screen as text, 1 byte per character: rows 00+ / 0B+ / 0B+ / 00+, columns 00+ / 28+ / 00+ / 28+ (hex) |
+| 04 | 3 | tile map in our font, 2-byte cells, x2 wide (all 64 x 32) |
+| 05 / 06 / 07 | 2.5 | 2-byte cells, captured glyphs 16x16 at 1 bpp: 1:1 (all) / x2 rows 00+ cells 00+ / x2 rows 0B+ cells 18+ |
+| 08 | 2.5 | 2-byte cells, 8x16 2 bpp, x2 wide |
+| 09 / 0A | 2.5 | 2-byte cells, 8x8 4 bpp (x2) / 8x16 4 bpp (x2 wide) |
+| 0B / 0C | 2.5 | 2-byte cells, 8x16 2 bpp SNES planar / 8x16 1 bpp (x2 wide) |
+| 0D | 2.5 | 1-byte entries, 8x16 2 bpp, 1:1 |
+| 0E | 2.5 | our font, 1-byte entries, 1:1 (120 x 32) |
+| 0F-12 | 2 | glyph sheets of the 8 KB: 16x16 1 bpp, 8x16 1 bpp, 8x16 2 bpp, 8x8 4 bpp |
+| 17, 18 | 3 | hex dump of the screen, 0x000-0x29F and 0x2A0-0x53F, 32 bytes per row |
+| 19 | 4 | press table: per press #, button, start T, screen CRC just before the next press |
+| 1A, 1B, 1C | 2, 4, 4 | link log: up to the first read, newest big writes, newest entries (as v4) |
+| 1D-23 | 2 | bit images of capture blocks 0-6 (1D = the screen, 1E/1F the 8 KB, 20 palette + registers, 21-23 the 0x1017 block) |
+| 24, 25 | 2 | SDRAM errors, raw words (as v4) |
+
+Graphics view headers: `VIEW nn mode glyph WxH (hex) bpp b planar(1)/own font(F) e entry bytes
+s x/y scale r first row c first column blk block CRC T #press`; mode 1 map, 2 sheet, 3 bits.
+Dark blue = outside the map, dark red = glyph number past the 8 KB.
+
+1. Put `out/q-hwtest.cor` (v5) on the card: `tools/sdcore setup`, `tools/sdcore use 12`; only the
+   chord file in `SPC/`.
+2. Power-cycle, start Tools → "Play SPC Files", film the screen **for 3 minutes, hands off**
+   (sound not needed; a pad may stay plugged in).
+3. Reading: extract frames at 2-4 fps as PNG (`ffmpeg -i IMG_xxxx.mov -vf fps=4
+   frames/f%04d.png`; `tools/frames.sh` gives 1 fps JPEGs for reading the text pages). Run
+   `python3 -I tools/bitdump.py --text 128 --cells frames/f*.png` (about 1 s per frame that is
+   not a bit image, 5-20 s per bit image): every frame of a bit-image page decodes to its 4 KB
+   block; each distinct block (by CRC) is printed once, as 32 rows of 64 characters (the
+   cells' character bytes). Page 1D's blocks are the screen before each press: their CRCs
+   should match the page header, the press table (page 19) and the change list (page 01);
+   1E-23 give the rest of the capture (`--out base` saves `base-<CRC>.bin` per block for
+   offline rendering, `--hex` shows bytes). Text pages 02/03 are readable directly; the
+   tile-map page that shows clean text gives the glyph format of the 8 KB.
+
+## hwtest v5 build (22 Oct)
+
+- `out/q-hwtest.cor` sha1 b74158a4…, timing met in every corner with 50 ps of extra hold margin
+  on the board clock (`hwtest.sdc`; the first build missed hold by 1 ps into the M10K holding
+  the screen-change history, now in MLABs), pin check passes (the same 138 I/Os and settings as
+  v3/v4). 148 of 308 RAM blocks. The map report's Inverted Register Statistics now list
+  `cand_q[0]`, vpress's `btn_q`/`xbtn_q` and the SDRAM command register: they power up high.
+- `make sim-screen` (new, Verilator, ~3 min): the PIC stand-in writes 2-byte cells and 16x16
+  1 bpp glyphs; every page rendered once (`build/sim/screen-PP-FFF.png`, PP = page, decimal):
+  text views, tile maps (05-07 show the text), sheets, hex, history and press table match
+  the stand-in; all 24 bit-image frames decode with `tools/bitdump.py` to the capture's CRCs,
+  and so does a mock photo (keystone, blur, noise, JPEG). The bit-image decoder was also
+  checked on a harsher mock (barrel distortion, light gradient, JPEG 50).
+- `make sim-hwtest` (iverilog): the four link scenarios pass, with the candidate register
+  forced to 0 at power-up as on the console (the post-configuration load restores 02), the
+  file (a 1 KB run, FILE_RUN in the testbench) recorded after press 2 = START; I2S check passes.
+
+## hwtest v4 / v4b (12-q-hwtest, 22 Oct) results
+
+Chord file only. v4 (commit 9f37a27): video `IMG_3063.mov`; v4b (c2ae39b, presses go on after
+the first big write, order A, START, A, START, DOWN, A, RIGHT, A, X, Y, L, R, UP, LEFT, SELECT, B):
+`IMG_3064.mov`; 1 fps frames in `~/scratch/hwtest-videos/IMG_306x/`. Transcription of the
+pages in `notes/buslog-2026-10-22-hwtest.md` (fourth part).
+
+- **LINK: both started at candidate 0 again.** Page 1 (IMG_3064 f020): `0x2004_0000` answered
+  03 (the emulated IP, waitrequest stuck as in v3) for 0x114D57 polls from T 0x18D, then 02 at
+  T 0x14A2 and the PIC moved on: "answer 02 candidate 1 steps 01, fixed 1 cand 1 at T 014AE",
+  the same as v3. **Root cause: Quartus ignores initial values in ANSI port declarations.**
+  `output reg [3:0] cand = FIRST_CAND` powered up 0, and so did vpress's `btn = 4'hF` and
+  `xfer_btn = 4'hF` (the overview at f009 showed "press #00 = button 0" and "file: after press
+  #00 = button 0", not F). Evidence in the reports: synthesis warning 10030 "no driver or
+  initial value, using a default initial value '0'" for `i2s_test`'s `mode` (declared the same
+  way), `sdram_test`'s `sd_cs_n = 1'b1` "stuck at GND", and none of these registers in the map
+  report's Inverted Register Statistics (where Cyclone V power-up-high registers appear,
+  NOT-gate push-back). v4b's `(* preserve *)` only stopped the merge with `n_steps[0]`. Fixed in
+  v5 (internal registers + a 256-clock post-configuration load of FIRST_CAND; the same pattern
+  fixed in vpress, i2s_test, sdram_test, sdram_rom; `notes/quartus.md`, "Power-up values").
+- **The player redraws a 4 KB screen at `0x1018_0000` after button presses.** Page 2 (IMG_3064
+  f180, newest big runs; press n of v4b started at 16.05 + 3.5 (n - 1) s, T in 1.024 ms):
+
+  | T | CRC-32 (0x1000 bytes) | after |
+  |---|---|---|
+  | 014F1 | CE6B18CC | the set-up (first screen) |
+  | 04C43 / 04C45 | 37118BEB / 960EF583 | press 2 START, +437 / +439 ms |
+  | 04E8D | 960EF583 | START + 1037 ms (same screen again) |
+  | 072AB | FC96DD53 | press 5 DOWN, +5 ms |
+  | 0B71B | A60352C7 | press 10 Y, +445 ms |
+  | 0DD7E | 8059CE1D | press 13 UP, +8 ms |
+  | 0F9C8 | CE6B18CC | press 15 SELECT, +424 ms: back to the first screen |
+  | 105AC | 3596478E | press 16 B, +41 ms |
+
+  A (presses 1, 3, 6, 8), the second START, RIGHT, X, L, R and LEFT changed nothing. v4
+  (IMG_3063) shows the same START response (37118BEB, then 960EF583 twice). Nothing else
+  wrote 4 KB or more: data writes 0x112C8 in all, 0xC7ED after the poll (f163); no .spc data.
+- **The screen is a map of 2-byte cells: character (ASCII), then an attribute byte.** Page 3
+  (f187, newest entries) shows B's update in detail: `0x1000_D129` = 01, 16 bytes at
+  `0x1018_0DE8` starting 0x54 ('T'), then 16 bytes at `0x0DE8` and 8 at `0x0E6C`, both `20 00`
+  repeated (by their CRCs), `0x1000_D129` = 00, then the whole 4 KB. With 64 cells per 128-byte
+  row, 0x0DE8 is row 27, cells 52-59, ending exactly at cell 60 = 1920 / 32 (32-pixel cells at
+  1080p, e.g. 16x16 glyphs drawn twice as large: 256 glyphs x 32 bytes would be the 8 KB at
+  `0x1006_0000`) [likely]; 0x0E6C is row 28, cells 54-57. `0x1000_D129` brackets partial
+  updates (a "hold display" flag?) [guess]. Before that, `0x1000_D110` (04 03 02 01 00) /
+  `0x1000_D114` (0C 08 06 04 02 00) ramp down at T 0xFB2E-0xFBCF, after SELECT (a fade; v4 showed
+  one after START). The UI loop (`0x1000_D120` = 01 every 32 ms) went on throughout.
+- **Pressing stopped after 16 presses** (overview "press #10" is hex) because vpress counted the
+  eight 4 KB redraws towards its 32 KB "file" limit (state 3 at the eighth, T 0x105AC); fixed
+  in v5 (only writes outside the UI's regions count).
+- PADS: IMG_3064 "port 1 raw 00000000, std pad 0" (no pad plugged in; the virtual presses
+  don't need one). AUDIO: I2S tone, quiet, fine. SDRAM: as v3 (chip B fine, chip A dead).
+- Stock core, briefly: the link's write data go through a 40-bit FIFO (`M10K.022.021`/`.022`,
+  address + data) into other clock domains; where `0x1006`/`0x1018` land wasn't traced (v5
+  captures them instead).
+
+## hwtest v4 plan (22 Oct)
 
 Starting the player: Tools → "Play SPC Files" (picking a file in the file browser didn't start
 it for Denley). That player takes the whole `SPC/` folder, so for one-file tests only that file
@@ -183,7 +333,7 @@ chord file was run (results below); the link part showed why nothing else could 
 | 07/08 | buslog / q-buslog | hex log of the PIC32 link; film ~3 min |
 | 09 | q-snes | green bar + 7 green test lines, white and cyan moving squares |
 | 10/11 | plltest / blinky | only if 05/06 show nothing |
-| 12 | q-hwtest | v4: status 02, pad registers with automatic virtual presses, ring log; SDRAM, pads, audio as v3 (see Next session) |
+| 12 | q-hwtest | v5: the player's screen captured and shown (text, tile maps, bit images for tools/bitdump.py), a press every 4 s; answer 02 from the start; pads, SDRAM, audio as v4 (see Next session) |
 | 13 | q-snes_sdram | as 09, but the ROM runs from SDRAM |
 | 00 | stock JB7.2 | restore |
 

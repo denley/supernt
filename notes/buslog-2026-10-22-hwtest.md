@@ -416,3 +416,74 @@ after the last big run at T 0x14F1 = 5.4 s).
 - Audio: audible from ~4 s; `tools/audiocheck.py`: the I2S segments (440 Hz) clean, the
   left-justified ones harsh. `AUD_FRAMING` = 0.
 - SDRAM: see `notes/sdram.md`, "hwtest v3 result".
+
+# Fourth and fifth runs, 22 Oct 2026: 12-q-hwtest v4 and v4b, "Super Nt test chord.spc"
+
+- v4 (commit 9f37a27): `IMG_3063.mov`; v4b (c2ae39b): `IMG_3064.mov`. Frames at 1 fps in
+  `~/scratch/hwtest-videos/IMG_306x/fNNN.jpg`; readable crops with `convert fNNN.jpg -crop
+  1550x900+230+40 -normalize -level 30%,95%`. Overview pages ~f008-017, f058-067, f108-117,
+  f158-167; page 2 (newest big runs) ~f026-033, f076-083, f126-133, f176-183. Reading in
+  `notes/hardware-tests.md`, "hwtest v4 / v4b results".
+
+## IMG_3064 page 1 (f020): around the first status read
+
+| # | K | address | bytes | D0 | CRC-32 | T | repeats | last T |
+|---|---|---|---|---|---|---|---|---|
+| 0AB-0B8 | 0 | 1000D110 / 1000D114 | 1 / 2 | 08/10 ... 60/C0 | (ramp up as in v3) | 0008F-0016D | 1 | |
+| 0B9 | 0 | 10100033 | 1 | 00 | D202EF8D | 0018D | 1 | 0018D |
+| 0BA | 0 | 10000500 | 4 | 00 | 2144DF1C | 0018D | 1 | 0018D |
+| 0BB | 1 | 20040000 | 2 | **03** | F3FD1086 | 0018D | 00114D57 | 014A2 |
+| 0BC | 1 | 20040000 | 2 | 02 | 9DE11151 | 014A2 | 1 | 014A2 |
+| 0BD | 0 | 10000510 | 4 | 04 | A92FE097 | 014A2 | 1 | 014A2 |
+
+## IMG_3064 overview
+
+- f009 (t ~ 8 s): answer 03, candidate 0, steps 00, polling 1 from T 0018F; video PLL locked 1,
+  waitrequest 1 (ever 0: 0), pending 1; pads raw 00000000 (no pad); PLAYER UI pad reads 0,
+  "virtual press #00 = button 0", "file: after press #00 = button 0" (initial value F lost).
+- f163 (t ~ 162 s): answer 02 candidate 1 steps 01, fixed 1 cand 1 at T 014AE; status reads
+  00229AE3, data writes 000112C8, after poll 0000C7ED, reads 0023144F, runs 0233, big 0011;
+  pad reads 00007964 from T 01718; press #10 (hex) = button 0, state 3; file: after press #02
+  = button 3 at T 04C43, 0006AC4B us after it; SDRAM pass 0298; audio framing 0, PLL 1.
+
+## IMG_3064 page 2 (f180): write runs of 32+ bytes
+
+| # | address | bytes | D0 | CRC-32 | T |
+|---|---|---|---|---|---|
+| 000 | 00000000 | 1EAE | AD | 93F13134 | 00000 |
+| 003 | 10100000 | 0028 | 03 | 7B4EDA37 | 00003 |
+| 026 | 111F8100 | 0080 | 00 | FCB64B27 | 00004 |
+| 0A4 | 10170800 | 2500 | 00 | B1883CCD | 00008 |
+| 0F6 | 10060000 | 2000 | ED | B5CFAF0C | 014AC |
+| 0F9 | 10100000 | 0028 | 03 | 7B4EDA37 | 014B0 |
+| 11B | 10013000 | 0300 | 00 | D0C0DF2A | 014B1 |
+| 11D | 111F8100 | 0080 | 00 | FCB64B27 | 014B2 |
+| 13D | 10180000 | 1000 | 00 | CE6B18CC | 014F1 |
+| 181 | 10180000 | 1000 | 00 | 37118BEB | 04C43 |
+| 185 | 10180000 | 1000 | 00 | 960EF583 | 04C45 |
+| 1A8 | 10180000 | 1000 | 00 | 960EF583 | 04E8D |
+| 1AB | 10180000 | 1000 | 00 | FC96DD53 | 072AB |
+| 1C3 | 10180000 | 1000 | 00 | A60352C7 | 0B71B |
+| 1E8 | 10180000 | 1000 | 00 | 8059CE1D | 0DD7E |
+| 209 | 10180000 | 1000 | 00 | CE6B18CC | 0F9C8 |
+| 231 | 10180000 | 1000 | 00 | 3596478E | 105AC |
+
+IMG_3063 page 2 (f130) has the same rows up to #1A8 (block at 0: 1EAB bytes, D0 ED, 7F06B90D;
+the START redraws at T 04C42, 04C45, 04E8D with the same CRCs).
+
+## IMG_3064 page 3 (f187): the newest entries
+
+| # | K | address | bytes | D0 | CRC-32 | T | repeats | last T |
+|---|---|---|---|---|---|---|---|---|
+| 220-22A | 0 | 1000D114 / 1000D110 | 2 / 1 | 0C, 04, 08, 03, 06, 02, 04, 01, 02, 00, 00 | | 0FB2E-0FBCF | 1 | |
+| 22B | 0 | 1000D120 | 1 | 01 | A505DF1B | 0FC10 | 0000004D | 105A9 |
+| 22C | 0 | 10180DE8 | 10 | 54 | 37D9EFD0 | 105A9 | 1 | 105A9 |
+| 22D | 0 | 1000D129 | 1 | 01 | A505DF1B | 105A9 | 1 | 105A9 |
+| 22E | 0 | 10180DE8 | 10 | 20 | AAE07C24 | 105AC | 1 | 105AC |
+| 22F | 0 | 10180E6C | 08 | 20 | AE4E3395 | 105AC | 1 | 105AC |
+| 230 | 0 | 1000D129 | 1 | 00 | D202EF8D | 105AC | 1 | 105AC |
+| 231 | 0 | 10180000 | 1000 | 00 | 3596478E | 105AC | 1 | 105AC |
+| 232 | 0 | 1000D120 | 1 | 01 | A505DF1B | 105CE | 00000D74 | 2B89B |
+
+AAE07C24 and AE4E3395 are 20 00 repeated 8 and 4 times (checked by CRC; plain spaces give
+9869748B / A3114325): 2-byte cells "space, attribute 00". The 16 bytes at #22C start with 'T'.

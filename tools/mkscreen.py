@@ -8,11 +8,13 @@ lines). Plain text is shown as is (white). `{W.D}` shows the low D hex
 digits of status word W (0-31) in cyan, most significant first; `{W.D@N}` starts at nibble N
 instead of 0; `:C` at the end picks the colour (w = white, c = cyan, y = yellow, g = green). `[C]` switches the colour of the following plain
 text on that line (`[w]` back to white). `{?F:TEXT}` is TEXT (current colour) shown only while
-bit F (0-31) of the flag word (textmode's FLAG_WORD) is 1, blank otherwise. Lines longer than
-80 cells are an error.
+bit F (0-31) of the flag word (textmode's FLAG_WORD) is 1, blank otherwise. `{E:n}` is n
+external character cells (textmode shows the byte the caller supplies for the cell). Lines
+longer than 80 cells are an error.
 
 Template word (16 bits): bit 15 = field; bits 14:13 = colour; field: bits 12:8 = word,
-bits 2:0 = nibble; text: bits 6:0 = ASCII, bit 12 = conditional, bits 11:7 = its flag bit.
+bits 2:0 = nibble; text: bits 6:0 = ASCII (7F = external), bit 12 = conditional, bits 11:7 =
+its flag bit.
 """
 import re
 import sys
@@ -23,9 +25,11 @@ COLOURS = {'w': 0, 'c': 1, 'y': 2, 'g': 3}
 
 def compile_line(line, n):
     cells, colour, pos = [], 0, 0
-    for m in re.finditer(r'\{(\d+)\.(\d)(?:@(\d))?(?::([wcyg]))?\}|\[([wcyg])\]|\{\?(\d+):([^}]*)\}|(.)',
-                         line):
-        if m.group(6):
+    for m in re.finditer(r'\{(\d+)\.(\d)(?:@(\d))?(?::([wcyg]))?\}|\[([wcyg])\]|\{\?(\d+):([^}]*)\}'
+                         r'|\{E:(\d+)\}|(.)', line):
+        if m.group(8):
+            cells += [colour << 13 | 0x7F] * int(m.group(8))
+        elif m.group(6):
             fl = int(m.group(6))
             if not 0 <= fl < 32:
                 sys.exit(f'line {n}: bad flag {m.group(0)}')
@@ -42,9 +46,9 @@ def compile_line(line, n):
         elif m.group(5):
             colour = COLOURS[m.group(5)]
         else:
-            ch = ord(m.group(8))
+            ch = ord(m.group(9))
             if not 0x20 <= ch < 0x7F:
-                sys.exit(f'line {n}: character {m.group(8)!r} not in the font')
+                sys.exit(f'line {n}: character {m.group(9)!r} not in the font')
             cells.append(colour << 13 | ch)
     if len(cells) > COLS:
         sys.exit(f'line {n}: {len(cells)} cells, max {COLS}')

@@ -21,7 +21,7 @@ module i2s_test #(
     output reg         bclk = 1'b0,     // L19
     output reg         lrclk = 1'b0,    // K17
     output reg         sdata = 1'b0,    // L18
-    output reg         mode = FIXED_MODE == 1,
+    output wire        mode,            // 0 I2S, 1 left-justified (mode_q)
     output reg  [7:0]  secs = 8'd0      // seconds since start (status)
 );
     altddio_out #(
@@ -32,6 +32,10 @@ module i2s_test #(
         .datain_h(1'b1), .datain_l(1'b0), .outclock(mclk), .dataout(mclk_pin),
         .aclr(1'b0), .aset(1'b0), .oe(1'b1), .oe_out(), .outclocken(1'b1), .sclr(1'b0), .sset(1'b0)
     );
+
+    // internal: Quartus ignores initial values in ANSI port declarations (notes/quartus.md)
+    reg mode_q = FIXED_MODE == 1;
+    assign mode = mode_q;
 
     (* ramstyle = "M10K" *) reg signed [15:0] sine [0:1023];
     initial $readmemh(SINE_HEX, sine);
@@ -67,7 +71,7 @@ module i2s_test #(
                 phase  <= phase + inc;
                 if (nsamp == MODE_SAMPLES - 1) begin
                     nsamp <= 18'd0;
-                    if (FIXED_MODE < 0) mode <= ~mode;
+                    if (FIXED_MODE < 0) mode_q <= ~mode_q;
                 end else
                     nsamp <= nsamp + 18'd1;
                 if (nsec == 16'd47999) begin

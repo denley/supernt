@@ -72,7 +72,8 @@ module link_logger #(
     // UI reads (NOLOG addresses) and transfers
     output reg  [31:0] n_nolog = 0,     // reads not logged
     output reg         rd2 = 1'b0,      // pulse: a NOLOG read
-    output reg         xfer = 1'b0,     // pulse: a write run reached XFER bytes
+    output reg         xfer = 1'b0,     // pulse: a write run reached XFER bytes ...
+    output reg  [31:0] xfer_addr = 32'd0, // ... starting at this address
     // counters
     output reg  [31:0] n_wr_total = 0,  // A=2 data writes
     output reg  [31:0] n_rd_total = 0,
@@ -87,9 +88,7 @@ module link_logger #(
     output reg  [31:0] last_act = 32'd0, // time of the last strobe
     output reg  [31:0] arm_t = 32'd0,   // time the port was armed
     // handshake
-    // preserve: n_steps[0] toggles with cand[0], and Quartus merged the two, losing FIRST_CAND
-    // (hwtest v4 started at candidate 0)
-    (* preserve *) output reg  [3:0]  cand = FIRST_CAND,     // 0x2004 answer candidate now in use
+    output wire [3:0]  cand,            // 0x2004 answer candidate now in use (FIRST_CAND first)
     output wire [7:0]  answer,          // its value now
     output reg  [7:0]  n_steps = 8'd0,  // candidate steps so far
     output reg         polling = 1'b0,  // >= POLL_READS status reads seen
@@ -99,6 +98,18 @@ module link_logger #(
     output reg  [31:0] fix_t = 32'd0,
     output reg  [31:0] n_wr_after = 0   // data bytes since the first status read / last step
 );
+    // ------------------------------------------------------------ candidate register
+    // Quartus ignores initial values written in an ANSI port declaration (`output reg x = v`:
+    // warning 10030 "no driver or initial value"), so v4/v4b's `output reg cand = FIRST_CAND`
+    // powered up as 0 on the console (and every other register declared that way, e.g.
+    // vpress's btn = 4'hF, showed 0). The candidate is an internal register now, and it is also
+    // loaded explicitly for the first 256 clocks after configuration, so it starts at FIRST_CAND
+    // whatever the power-up value.
+    reg [3:0] cand_q = FIRST_CAND;
+    reg [8:0] por = 9'd0;               // post-configuration init: 256 clocks
+    wire      por_done = por[8];
+    assign cand = cand_q;
+
     // ------------------------------------------------------------ inputs: 2-FF synchronisers
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [12:0] s1 = 13'h1800, s2 = 13'h1800;
@@ -208,7 +219,7 @@ module link_logger #(
             win_wr <= 5'd0;
             win_rd <= 1'b0;
             if (win_rd && !win_wr[4] && !cand_locked) begin
-                cand <= cand == 4'd9 ? 4'd0 : cand + 4'd1;
+                cand_q <= cand_q == 4'd9 ? 4'd0 : cand_q + 4'd1;
                 n_steps <= n_steps + 8'd1;
                 c_t0 <= usec;
                 n_wr_after <= 32'd0;
@@ -217,6 +228,10 @@ module link_logger #(
             if (us_tick) win_us <= win_us + 32'd1;
             if (wr_fall && sa == 3'd2 && !win_wr[4]) win_wr <= win_wr + 5'd1;
             if (stat_rd) win_rd <= 1'b1;
+        end
+        if (!por_done) begin
+            por <= por + 9'd1;
+            cand_q <= FIRST_CAND;
         end
     end
 
@@ -304,6 +319,7 @@ module link_logger #(
     always @(posedge clk) begin
         flush <= 1'b0;
         xfer  <= ev && cont && run_kind == 2'd0 && run_cnt == XFER - 1;
+        if (ev && cont && run_kind == 2'd0 && run_cnt == XFER - 1) xfer_addr <= run_addr;
         if (ev) begin
             if (cont) begin
                 run_cnt <= run_cnt + 22'd1;
@@ -335,6 +351,8 @@ module link_logger #(
     endfunction
     (* ramstyle = "M10K" *) reg [191:0] log_all [0:1023];
     (* ramstyle = "M10K" *) reg [223:0] log_big [0:255];   // {all-log index, entry}
+    wire [9:0]  ph_prev = phys(n_all - 1);
+    wire [9:0]  ph_new  = phys(n_all);
     reg [127:0] last_e = 128'd0;        // words 0-3 of the newest entry
     reg [31:0]  last_rep = 32'd0;
     wire [21:0] f_cnt  = flush_e[53:32];
@@ -345,11 +363,11 @@ module link_logger #(
     always @(posedge clk) begin
         if (flush && same) begin
             last_rep <= last_rep + 32'd1;
-            log_all[phys(n_all - 1)] <= {12'd0, flush_e[115:96], last_rep + 32'd1, last_e};
+            log_all[ph_prev] <= {12'd0, flush_e[115:96], last_rep + 32'd1, last_e};
         end else if (flush) begin
             last_e   <= flush_e;
             last_rep <= 32'd1;
-            log_all[phys(n_all)] <= {12'd0, flush_e[115:96], 32'd1, flush_e};
+            log_all[ph_new] <= {12'd0, flush_e[115:96], 32'd1, flush_e};
             n_all <= n_all + 1;
             if (f_kind == 2'd1 && !have_rd) begin
                 first_rd <= n_all;
