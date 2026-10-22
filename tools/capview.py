@@ -9,7 +9,9 @@ MS2109) and writes:
   - a 960x540 10 fps MJPEG stream, served over HTTP on the tailnet address only:
       http://homebox.jaguar-munsell.ts.net:8765/        live view (open on the phone)
       http://homebox.jaguar-munsell.ts.net:8765/snap.jpg latest frame
-Ctrl-C (or kill) stops the recording. Frames for reading: tools/frames.sh REC.mkv DIR [fps].
+The capture ends whenever the HDMI signal goes away (console off, core loading, video mode
+change), so ffmpeg is restarted in a loop, one rec-*.mkv per stretch of signal. Ctrl-C (or
+kill -INT) stops it. Frames for reading: tools/frames.sh REC.mkv DIR [fps].
 """
 import glob
 import http.server
@@ -25,38 +27,51 @@ outdir = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else '~/scratch/cap
 os.makedirs(outdir, exist_ok=True)
 ff = (glob.glob(os.path.expanduser(
     '~/scratch/ffvenv/lib/python3*/site-packages/imageio_ffmpeg/binaries/ffmpeg-*')) or ['ffmpeg'])[0]
-rec = os.path.join(outdir, time.strftime('rec-%Y%m%d-%H%M%S.mkv'))
-cmd = [ff, '-hide_banner', '-loglevel', 'error',
-       '-f', 'v4l2', '-input_format', 'mjpeg', '-video_size', '1920x1080', '-framerate', '30',
-       '-thread_queue_size', '512', '-i', '/dev/video0',
-       '-f', 'alsa', '-thread_queue_size', '512', '-i', 'hw:CARD=MS2109',
-       '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'pcm_s16le', rec,
-       '-map', '0:v', '-vf', 'fps=10,scale=960:540', '-c:v', 'mjpeg', '-q:v', '5',
-       '-f', 'mpjpeg', '-boundary_tag', 'frame', 'pipe:1']
-proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
 
+
+def ffmpeg_cmd(rec):
+    return [ff, '-hide_banner', '-loglevel', 'error',
+            '-f', 'v4l2', '-input_format', 'mjpeg', '-video_size', '1920x1080', '-framerate', '30',
+            '-thread_queue_size', '512', '-i', '/dev/video0',
+            '-f', 'alsa', '-thread_queue_size', '512', '-i', 'hw:CARD=MS2109',
+            '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'pcm_s16le', rec,
+            '-map', '0:v', '-vf', 'fps=10,scale=960:540', '-c:v', 'mjpeg', '-q:v', '5',
+            '-f', 'mpjpeg', '-boundary_tag', 'frame', 'pipe:1']
+
+
+proc = None
+stopping = False
 latest = b''
 cond = threading.Condition()
 
 
 def reader():
-    """Split ffmpeg's multipart output into JPEG frames."""
-    global latest
-    buf = b''
-    while True:
-        chunk = proc.stdout.read(65536)
-        if not chunk:
-            break
-        buf += chunk
+    """Run ffmpeg (restarting it when the signal drops) and split its multipart output into
+    JPEG frames."""
+    global latest, proc
+    while not stopping:
+        rec = os.path.join(outdir, time.strftime('rec-%Y%m%d-%H%M%S.mkv'))
+        proc = subprocess.Popen(ffmpeg_cmd(rec), stdout=subprocess.PIPE)
+        print(f'recording {rec}', flush=True)
+        buf = b''
         while True:
-            s = buf.find(b'\xff\xd8')
-            e = buf.find(b'\xff\xd9', s + 2)
-            if s < 0 or e < 0:
+            chunk = proc.stdout.read(65536)
+            if not chunk:
                 break
-            with cond:
-                latest = buf[s:e + 2]
-                cond.notify_all()
-            buf = buf[e + 2:]
+            buf += chunk
+            while True:
+                s = buf.find(b'\xff\xd8')
+                e = buf.find(b'\xff\xd9', s + 2)
+                if s < 0 or e < 0:
+                    break
+                with cond:
+                    latest = buf[s:e + 2]
+                    cond.notify_all()
+                buf = buf[e + 2:]
+        proc.wait()
+        if os.path.exists(rec) and os.path.getsize(rec) < 100000:
+            os.remove(rec)          # no signal: nothing worth keeping
+        time.sleep(1)
 
 
 PAGE = b"""<!doctype html><meta name=viewport content="width=device-width">
@@ -84,7 +99,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
             self.end_headers()
             try:
-                while proc.poll() is None:
+                while not stopping:
                     with cond:
                         cond.wait(2)
                         f = latest
@@ -101,15 +116,18 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
-threading.Thread(target=reader, daemon=True).start()
-print(f'recording {rec}; live view http://homebox.jaguar-munsell.ts.net:{ADDR[1]}/', flush=True)
+print(f'live view http://homebox.jaguar-munsell.ts.net:{ADDR[1]}/', flush=True)
 srv = Server(ADDR, Handler)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
+threading.Thread(target=reader, daemon=True).start()
 try:
-    proc.wait()
+    while True:
+        time.sleep(1)
 except KeyboardInterrupt:
     pass
 finally:
-    proc.terminate()
-    proc.wait()
+    stopping = True
+    if proc:
+        proc.terminate()
+        proc.wait()
     srv.shutdown()
