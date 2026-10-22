@@ -19,11 +19,12 @@ module top #(
     parameter LOCK       = 1,       // align output frames to the SNES (snes_video.sv)
     parameter [15:0] RESET_CYCLES = 16'hffff, // core reset after PLL lock (clk_sys cycles)
     // Serial audio framing the AD9889B expects (notes/audio.md): 0 = I2S, 1 = left-justified.
-    // Not confirmed yet (quartus/hwtest plays both).
+    // Not settled: hwtest v1 (22 Oct 2026) was silent in both framings; the PIC probably sets
+    // up the HDMI audio only after the status handshake it never got (notes/hardware-tests.md).
     parameter AUD_FRAMING = 0,
     // Controller port wiring (notes/controllers.md, numbering as quartus/common/pad_test.sv):
     // bit 1 = swap roles (latch on J13/K16, clock on P14), bit 0 = invert both outputs.
-    // Not confirmed yet (quartus/hwtest tries all four).
+    // 0 confirmed on the console (hwtest, 22 Oct 2026: FFFF0000 idle, B/Start/A read right).
     parameter [1:0] PAD_CFG = 2'd0
 ) (
     input  wire       clk,      // W16, 74.25 MHz

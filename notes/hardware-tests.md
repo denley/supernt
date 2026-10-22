@@ -25,7 +25,7 @@ pulling it.
   A major chord (440/554/659 Hz square waves; checked with libgme). Copied to
   the card 21 Oct; `tools/sdcore setup` copies it too.
 
-## hwtest (12-q-hwtest) loading test files
+## Test files
 
 `SPC/` on the card holds three files for the link logger (CRC-32 = zlib):
 
@@ -35,28 +35,59 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
-## Next session (prepared 21–22 Oct overnight)
+## Next session: hwtest v2 (prepared 22 Oct)
 
 Starting the player: Tools → "Play SPC Files" (picking a file in the file browser didn't start
 it for Denley). That player takes the whole `SPC/` folder, so for one-file tests only that file
 stays in `SPC/` and the rest wait in `SPC-later/` on the card (22 Oct: chord only).
 
-1. `12-q-hwtest` (installed as spc.cor): one core for audio framing, controller port 1, the x8
-   SDRAM pair and the PIC32 link logger. For each of the three test files (chord, big 1MB,
-   Gradius ROM), power-cycle, play it, and film the screen for a full minute **with sound**
-   while pressing a few buttons on a pad in port 1 (B, then Start, then A). Read off:
-   - AUDIO: which framing's pitch sounds clean (from the video's sound track: 440 Hz = I2S,
-     880 Hz = left-justified) -> `AUD_FRAMING` in quartus/snes/snes_top.sv.
-   - PADS: which cfg line reads FFFF0000 idle and changes with buttons -> `PAD_CFG`.
-   - SDRAM: which capture point stays at 0 errors, and whether DQM-low/off matters.
-   - LINK: big runs (address, byte count, CRC-32) vs the CRC table above: does the file
-     arrive, where, and how much of it (whole file, or the .spc structure only).
-2. `09-q-snes` rebuilt with audio (test ROM plays the chord after the SA-1 tests) and
-   controller port 1 (backdrop turns blue while a button is held), using the settings from 1.
-3. `13-q-snes_sdram` (on the card since 22 Oct, not installed): the same test ROM, copied into
-   the x8 SDRAM pair at start-up and run from there (notes/snes-sdram.md). Same picture as
-   q-snes if the SDRAM read timing is right; built for capture at fall 3.5, so set its
-   parameters from hwtest's SDRAM page first if that point shows errors.
+Build (22 Oct): `out/q-hwtest.cor` sha1 9c3a6424…, timing met, pin check passes (94 I/Os, as
+v1). `make sim-hwtest` passes: the PIC stand-in polls `0x2004_0000` and sends its 1 KB file after
+the first answer (03 03); a second run where it waits for 00 finds it after three 5 s steps
+(150 µs in simulation); pad model holding START + A shows both names; SDRAM model with AB10 as
+DQM: hypotheses 0/1 clean at r4/f4.5, 2/3 fail everywhere; I2S framing check passes.
+`make sim-sdram` passes.
+
+1. Put the new `out/q-hwtest.cor` (v2) on the card: mount it, `tools/sdcore setup`, then
+   `tools/sdcore use 12`. Keep only the chord file in `SPC/`.
+2. Power-cycle, start "Play SPC Files", and film the screen for **70 s with sound**. Hold B for
+   a moment, then Start, then A on a pad in port 1 during the first page. Frame the whole screen
+   with a margin (v1's top row and left column were cut off) and avoid direct daylight on it.
+3. Pages (cycle 34 s, so the film shows each twice): 0 overview (10 s), 1 link log from two
+   entries before the first status read, 2 write runs of 32+ bytes, 3 the newest log entries
+   (8 s each). What to read off:
+   - **LINK** (page 0, line 2): "0x2004 answer" and "candidate" (0 = 03, 1 = 02, 2 = 01, 3 = 00,
+     4 = FF); it steps every 5 s while the PIC only polls, "fixed 1" means the PIC then sent
+     ≥ 4 KB ("after 1st read" counts those bytes): that answer is the one. If the file arrives,
+     page 2 shows it as big write runs: compare the CRCs with the table below (where it goes:
+     address; whether whole file or only parts). Page 1 shows what the PIC does right after the
+     handshake (watch for writes to `0x1000_00C4`/`0x1000_05xx`, the video-PLL reconfiguration
+     block, and for further status polls); the REPEATS column counts merged identical runs.
+   - **AUDIO**: whether the test tone becomes audible once the handshake passes (v1 was silent;
+     the PIC may set up HDMI audio only afterwards). Which pitch is clean (440 Hz = I2S, 880 Hz
+     = left-justified) → `AUD_FRAMING`.
+   - **PADS**: the held button's name appears next to "held:" (B, Y, SELECT, START, UP, DOWN,
+     LEFT, RIGHT, A, X, L, R); raw word as before.
+   - **SDRAM**: four hypothesis rows (AB10 low/high × open-drain pins released/low), errors at
+     the eight capture points in that hypothesis's last pass (of 0x1000000 words). Expected: rows
+     0 and/or 1 (AB10 low, spc.cor's level) show 000000 at one or more capture points (r5/f4.5
+     likely), rows 2/3 stay at ~FFFF00 as in v1. The raw rows show the bus words at rising edges
+     2–7 after a READ next to the two expected words (a clean hypothesis shows them a few columns
+     in) and the idle bus. → `AB10_LEVEL`, `DQM_LOW` and the capture point for
+     `quartus/snes_sdram` (notes/snes-sdram.md).
+4. If the handshake works, repeat 2–3 with `Super Nt big 1MB.spc` and the Gradius ROM file (one
+   file in `SPC/` at a time, power-cycle between).
+5. `09-q-snes` (with audio and controller port 1, built with `PAD_CFG` 0 = confirmed and
+   `AUD_FRAMING` 0): the backdrop should turn blue while a button is held. Its audio will
+   probably stay silent like hwtest v1's (no handshake in that core either: it has no link slave).
+6. `13-q-snes_sdram` on the card is built with AB10 high (v1's setting, no SDRAM response): don't
+   run it until it is rebuilt with v2's SDRAM result.
+
+## hwtest v1 (12-q-hwtest, 21–22 Oct) loading test files
+
+v1's plan was: for each of the three test files, power-cycle, play it and film a minute while
+pressing B, Start, A; read audio framing, pad cfg, SDRAM capture point and link runs. Only the
+chord file was run (results below); the link part showed why nothing else could work yet.
 
 ## Order
 
@@ -68,7 +99,7 @@ stays in `SPC/` and the rest wait in `SPC-later/` on the card (22 Oct: chord onl
 | 07/08 | buslog / q-buslog | hex log of the PIC32 link; film ~3 min |
 | 09 | q-snes | green bar + 7 green test lines, white and cyan moving squares |
 | 10/11 | plltest / blinky | only if 05/06 show nothing |
-| 12 | q-hwtest | audio framing, pads, SDRAM capture, link log (see Next session) |
+| 12 | q-hwtest | v2: link handshake answer, SDRAM pin hypotheses, pads by name, audio (see Next session) |
 | 13 | q-snes_sdram | as 09, but the ROM runs from SDRAM |
 | 00 | stock JB7.2 | restore |
 
@@ -99,3 +130,24 @@ stays in `SPC/` and the rest wait in `SPC-later/` on the card (22 Oct: chord onl
 - 21 Oct 2026, `09-q-snes` with the 21.44196 MHz SNES clock (60.000 Hz, standard 720p60
   totals): **stable picture**, no rolling or dropouts. All 7 SA-1 tests green, both squares
   moving. Frames: `photos/q-snes-60hz-2026-10-21.jpg`. Milestone 1 done on hardware.
+- 22 Oct 2026, `12-q-hwtest` (v1), chord file only, video `IMG_3058.mov` (frames in
+  `~/scratch/hwtest-videos/3058/`; transcription and reading in
+  `notes/buslog-2026-10-22-hwtest.md`):
+  - **PADS: confirmed.** cfg 0 (and cfg 1) read FFFF0000 idle, FFFF0001 with B, FFFF0008 Start,
+    FFFF0100 A: `PAD_CFG` = 0 (P14 = latch, J13/K16 = clock, as decoded). cfg 2 reads 00000001,
+    cfg 3 00000000.
+  - **AUDIO: silent** in both framings (`tools/audiocheck.py`: noise only), audio PLL locked.
+    The stock player's audio works on this projector, so the AD9889B is probably not set up for
+    audio until the PIC gets past the handshake below [guess].
+  - **SDRAM: no response.** All eight capture points wrong on 16 776 960 of 16 777 216 words
+    every pass (0x0A passes → 0x09FFF601, 0x80 → 0x7FFF8000), DQM pins low or released alike:
+    the reads return a constant. v1 drove AB10 high; spc.cor drives it low
+    (notes/sdram.md, "Constant pins"). The "first f4.5 miss … got 0000 expected 0000" line is
+    explained there too.
+  - **LINK: the file never came.** The PIC did its set-up writes (4 big runs: 0x1EAF bytes at
+    0, 0x28 at 0x1010_0000, 0x80 at 0x111F_8100, 0x2500 at 0x1017_0800; none is the .spc file),
+    then from 406 ms on polled `0x2004_0000` (two bytes) ~305 000 times a second for the rest
+    of the minute. v1 answered `02 00`. Decode (notes/pic-link.md, "Status 0x2004_0000"): it is
+    the status of a reconfiguration block for the video PLL, same byte at every `0x2xx4_xxxx`
+    address, idle value 0x03 or 0x02 depending on one ambiguous clear polarity. → hwtest v2.
+

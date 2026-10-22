@@ -7,8 +7,12 @@
 // Each poll: latch high 12 us, then 32 bits, each sampled 6 us after the previous clock rise,
 // clock low 6 us / high 6 us (standard SNES timing). raw[cfg] = the 32 bits as read, bit 0
 // first, inverted so 1 = line low (= pressed on a standard pad). The first poll waits ~200 ms
-// after configuration (as spc.cor does); outputs stay low until then.
-module pad_test (
+// after configuration (as spc.cor does); outputs stay low until then. FIXED_CFG >= 0 polls
+// only that configuration (cfg 0 is confirmed on the console, notes/controllers.md).
+module pad_test #(
+    parameter integer FIXED_CFG = -1,
+    parameter integer START_US  = 200000   // first poll after configuration (simulation: less)
+) (
     input  wire        clk,             // 74.25 MHz
     output reg         p14 = 1'b0,
     output reg         j13k16 = 1'b0,
@@ -26,8 +30,8 @@ module pad_test (
     wire       us = udiv == 7'd73;      // 1 us tick
     always @(posedge clk) udiv <= us ? 7'd0 : udiv + 7'd1;
 
-    reg [17:0] wait_us = 18'd200000;    // start-up delay, then the gap between polls
-    reg [1:0]  cfg = 2'd0;
+    reg [17:0] wait_us = START_US[17:0];    // start-up delay, then the gap between polls
+    reg [1:0]  cfg = FIXED_CFG >= 0 ? FIXED_CFG[1:0] : 2'd0;
     reg [2:0]  st = 3'd0;
     reg [4:0]  t = 5'd0;                // us within a phase
     reg [5:0]  n = 6'd0;                // bit
@@ -69,7 +73,7 @@ module pad_test (
                                 default: raw3 <= {~ts[1], sh[31:1]};
                             endcase
                             polls <= polls + 16'd1;
-                            cfg <= cfg + 2'd1;
+                            cfg <= FIXED_CFG >= 0 ? FIXED_CFG[1:0] : cfg + 2'd1;
                             wait_us <= 18'd16000;
                             st <= S_WAIT;
                         end else begin

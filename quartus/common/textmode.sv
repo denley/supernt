@@ -4,14 +4,16 @@
 // text file (tools/mkscreen.py, up to PAGES pages), with live hex fields taken from 32 status
 // words. Words 0-23 come from `stat`; words 24-31 are per text row (`rowstat`, for tables): the
 // caller sees `row_next` (the text row of the next video line) and must present that row's
-// words, and `row_blank` to hide the row, before the line starts.
+// words, and `row_blank` to hide the row, before the line starts. Conditional text cells
+// (mkscreen `{?F:TEXT}`) are drawn only while bit F of status word FLAG_WORD is 1.
 //
 // Timing: CEA-861 VIC 4 (1650 x 750, positive syncs) on clk (74.25 MHz). Outputs are
 // registered; hs/vs/de and the colour leave together, 5 clocks after the counters.
 module textmode #(
     parameter SCREEN_HEX = "screen.hex",
     parameter FONT_HEX   = "font.hex",
-    parameter PAGES      = 1
+    parameter PAGES      = 1,
+    parameter integer FLAG_WORD = 23
 ) (
     input  wire          clk,
     input  wire [2:0]    page,
@@ -91,10 +93,12 @@ module textmode #(
     reg [2:0]  gx3;
     reg [3:0]  gy3;
     reg        in3, hs3, vs3, de3;
+    wire [31:0] flags = st_q[32*FLAG_WORD +: 32];
     always @(posedge clk) begin
         w3 <= t2[12:11] == 2'b11 ? rs[{t2[10:8], 5'd0} +: 32] : st_q[{t2[12:8], 5'd0} +: 32];
+        in3 <= in2 && !(!t2[15] && t2[12] && !flags[t2[11:7]]);
         t3 <= t2;
-        gx3 <= gx2; gy3 <= gy2; in3 <= in2; hs3 <= hs2; vs3 <= vs2; de3 <= de2;
+        gx3 <= gx2; gy3 <= gy2; hs3 <= hs2; vs3 <= vs2; de3 <= de2;
     end
 
     // Stage 4: glyph -> font byte.

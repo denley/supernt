@@ -1,9 +1,12 @@
 // Behavioural x16 SDRAM (two x8 chips in parallel) for simulating sdram_test.sv: CL3,
 // full-page bursts, BURST TERMINATE, small array (bank, 2 row bits, 10 column bits). Read data
-// goes invalid tOH = 2.7 ns after a clock edge and valid tAC = 5.4 ns after it.
+// goes invalid tOH = 2.7 ns after a clock edge and valid tAC = 5.4 ns after it. dqm = 1 masks
+// writes and turns the read outputs off (as DQM does; the 2-cycle read latency of DQM is not
+// modelled): the hwtest testbench wires AB10 here to model "AB10 is DQM".
 `timescale 1ns/1ps
 module sdram_model (
     input  wire        clk, cs_n, ras_n, cas_n, we_n,
+    input  wire        dqm,
     input  wire [11:0] a,
     input  wire [1:0]  ba,
     inout  wire [15:0] dq
@@ -27,7 +30,7 @@ module sdram_model (
         if (pv[2]) begin
             dq_drv <= #2.7 16'hxxxx;
             dq_drv <= #5.4 pipe[2];
-            drive  <= #2.0 1'b1;
+            drive  <= #2.0 !dqm;
         end else
             drive <= #2.7 1'b0;
         pipe[2] <= pipe[1]; pipe[1] <= pipe[0];
@@ -35,12 +38,12 @@ module sdram_model (
         case (c)
             4'b0011: row[ba] <= a;                                   // ACT
             4'b0100: begin wr <= 1; rd <= 0; bk <= ba; col <= 1;     // WRITE (first word now)
-                     mem[{ba, row[ba][1:0], 10'd0}] <= dq; end
+                     if (!dqm) mem[{ba, row[ba][1:0], 10'd0}] <= dq; end
             4'b0101: begin rd <= 1; wr <= 0; bk <= ba; col <= 1;     // READ
                      pipe[0] <= mem[{ba, row[ba][1:0], 10'd0}]; pv[0] <= 1; end
             4'b0110, 4'b0010, 4'b0001, 4'b0000: begin wr <= 0; rd <= 0; end   // BST PRE REF MRS
             default: begin                                           // NOP / deselect: burst goes on
-                if (wr) begin mem[{bk, row[bk][1:0], col}] <= dq; col <= col + 1; end
+                if (wr) begin if (!dqm) mem[{bk, row[bk][1:0], col}] <= dq; col <= col + 1; end
                 if (rd) begin pipe[0] <= mem[{bk, row[bk][1:0], col}]; pv[0] <= 1; col <= col + 1; end
             end
         endcase

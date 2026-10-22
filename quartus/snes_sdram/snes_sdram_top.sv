@@ -11,8 +11,10 @@
 //
 // Pins: board clock W16, the HDMI transmitter's video and audio pins and controller port 1 as in
 // quartus/snes/pins.tcl, the x8 SDRAM pair as in quartus/hwtest/pins.tcl (notes/sdram.md):
-// commands/address/DQ, clock AB11 (DDIO), CKE candidate AB10 driven high, DQM candidates held
-// low (open drain, DQM_LOW = 1) or released. Every other pin is left unused.
+// commands/address/DQ, clock AB11 (DDIO), AB10 driven to AB10_LEVEL (built with 1 = v1's "CKE";
+// spc.cor drives it low, notes/sdram.md "Constant pins"), DQM candidates held low (open drain,
+// DQM_LOW = 1) or released. Every other pin is left unused. hwtest v1 saw no SDRAM response
+// with AB10 high: set AB10_LEVEL/DQM_LOW from hwtest v2's clean hypothesis before using this.
 module top #(
     parameter ROM_HEX    = "../../build/snes/sa1test.hex",
     parameter BOOT_AW    = 12,       // boot ROM: 2^BOOT_AW 16-bit words (8 KB)
@@ -39,12 +41,15 @@ module top #(
     parameter LOCK       = 1,       // align output frames to the SNES (snes_video.sv)
     parameter [15:0] RESET_CYCLES = 16'hffff, // core reset after the boot copy (clk_sys cycles)
     // Serial audio framing the AD9889B expects (notes/audio.md): 0 = I2S, 1 = left-justified.
-    // Not confirmed yet (quartus/hwtest plays both).
+    // Not settled: hwtest v1 (22 Oct 2026) was silent in both framings; the PIC probably sets
+    // up the HDMI audio only after the status handshake it never got (notes/hardware-tests.md).
     parameter AUD_FRAMING = 0,
     // Controller port wiring (notes/controllers.md, numbering as quartus/common/pad_test.sv):
     // bit 1 = swap roles (latch on J13/K16, clock on P14), bit 0 = invert both outputs.
-    // Not confirmed yet (quartus/hwtest tries all four).
-    parameter [1:0] PAD_CFG = 2'd0
+    // 0 confirmed on the console (hwtest, 22 Oct 2026: FFFF0000 idle, B/Start/A read right).
+    parameter [1:0] PAD_CFG = 2'd0,
+    // AB10 level (notes/sdram.md "Constant pins"): from hwtest v2 (hypotheses 0/1 = low).
+    parameter AB10_LEVEL = 1
 ) (
     input  wire       clk,      // W16, 74.25 MHz
     output wire       pclk,     // M22, pixel clock to the AD9889B
@@ -110,7 +115,7 @@ module top #(
     wire [10:0] sd_rfmax /* verilator public_flat_rd */;
     always @(posedge clk_sys) sys_tog <= ~sys_tog;
     assign sd_dq  = sd_dq_oe ? sd_dq_out : 16'hzzzz;
-    assign sd_cke = 1'b1;
+    assign sd_cke = AB10_LEVEL;
     assign sd_dqm = DQM_LOW ? 8'h00 : 8'hzz;
     // Hidden refresh/write slots (sdram_rom.sv): with the SA-1 mapper, ROM addresses change only
     // at the clk_sys edge after a cycle with ROM_OE_N (= SA-1 CLK_CE) high or with SYSCLKF_CE

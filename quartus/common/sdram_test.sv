@@ -13,18 +13,27 @@
 // Clock: the controller runs on clk (74.25 MHz); the SDRAM clock is the inverted clk (DDIO),
 // so the chips sample commands and write data half a cycle after we change them. Read data is
 // captured on both clock edges and compared at eight candidate capture points, counted from
-// the clock edge that puts the READ command on the pins: err0/2/4/6 = rising edge 3/4/5/6
-// cycles later, err1/3/5/7 = falling edge 2.5/3.5/4.5/5.5 cycles later. The chips see the
-// command at 0.5, so with CL3 data is valid from ~3.5 + tAC to ~4.5 + tOH, later by the I/O and
-// board delays: err5, err2 or later expected (sim/sdram_model.v without I/O delays: err2 and
-// err5 pass). err[k] counts mismatching words, so one run on the console shows which works.
-// Each pass writes all 16384 rows (data = hash of bank/row/column/pass), then reads them all
-// back (~0.5 s per pass at 74.25 MHz). Passes alternate the DQM-candidate pins between driven
-// low (as spc.cor appears to) and released (notes/sdram.md): errors are counted separately
-// for the two (err_dqm0 / err_dqmz, best candidate only).
+// the clock edge that puts the READ command on the pins: point 0/2/4/6 = rising edge 3/4/5/6
+// cycles later, 1/3/5/7 = falling edge 2.5/3.5/4.5/5.5 cycles later (sim/sdram_model.v without
+// I/O delays: points 2 and 5 pass).
+//
+// Pin hypotheses (v2, notes/sdram.md "Constant pins"): hwtest v1 drove AB10 high and saw no
+// SDRAM response at all, with the DQM-candidate open-drain pins low or released. In spc.cor
+// AB10 is a constant output whose unrouted DATAOUT has the inverter set, which under the
+// fabric convention (unrouted = 1) is a constant 0, and the open-drain pins have DATAOUT
+// unrouted without inverter, i.e. released. Each pass (re-initialise, write all 16384 rows,
+// read them back, ~1 s) runs one hypothesis, in turn:
+//   hyp 0: AB10 low,  open-drain pins released   (spc.cor as decoded)
+//   hyp 1: AB10 low,  open-drain pins low
+//   hyp 2: AB10 high, open-drain pins released   (v1, "off")
+//   hyp 3: AB10 high, open-drain pins low        (v1, "low")
+// Per hypothesis the last pass's error count at each capture point is kept (err_row), plus the
+// raw bus words after the READ of bank 0 row 0 (raw_row: rising edges 2-7 after the READ, the
+// two words expected first, and the bus while nobody drives it).
 module sdram_test #(
     parameter [11:0] MRS_PINS = 12'h037,  // a[k] high for spc's MRS pattern
-    parameter [11:0] ROWS     = 12'd4095  // last row tested (simulation uses fewer)
+    parameter [11:0] ROWS     = 12'd4095, // last row tested (simulation uses fewer)
+    parameter [15:0] INIT_NOP = 16'd20000 // NOP cycles before the init sequence (~270 us)
 ) (
     input  wire        clk,
     output wire        sd_clk,          // AB11 (DDIO, inverted clk)
@@ -37,14 +46,19 @@ module sdram_test #(
     input  wire [15:0] sd_dq_in,
     output reg  [15:0] sd_dq_out = 16'd0,
     output reg         sd_dq_oe = 1'b0,
-    output reg         dqm_low = 1'b0,  // drive the DQM-candidate pins low (else release them)
+    output wire        ab10,            // level for AB10
+    output wire        dqm_low,         // drive the open-drain candidate pins low (else release)
     // status
-    output reg  [31:0] err0 = 0, err1 = 0, err2 = 0, err3 = 0, err4 = 0, err5 = 0, err6 = 0, err7 = 0,
     output reg  [15:0] passes = 0,
-    output reg  [31:0] err_dqm0 = 0, err_dqmz = 0,  // per DQM mode, candidate with fewest errors
-    output reg  [31:0] first_bad = 32'hFFFFFFFF,     // {bank, row, col} of the first err5 miss
-    output reg  [15:0] first_got = 0, first_exp = 0
+    output reg  [1:0]  hyp = 2'd0,      // hypothesis of the pass running now
+    input  wire [1:0]  hsel,            // hypothesis shown in err_row/raw_row
+    output wire [255:0] err_row,        // 8 x 32: errors at capture point 0-7, last pass of hsel
+    output wire [143:0] raw_row,        // {idle, exp1, exp0, raw r7..r2} (16 bits each)
+    output wire [15:0] hyp_passes       // passes run with hsel
 );
+    assign ab10    = hyp[1];
+    assign dqm_low = hyp[0];
+
     altddio_out #(
         .extend_oe_disable("OFF"), .intended_device_family("Cyclone V"),
         .invert_output("OFF"), .lpm_hint("UNUSED"), .lpm_type("altddio_out"),
@@ -61,10 +75,11 @@ module sdram_test #(
         {sd_cs_n, sd_ras_n, sd_cas_n, sd_we_n} <= c;
     endtask
 
+    // test pattern: never 0000 for the first word (a dead bus often reads 0000 or FFFF)
     function [15:0] pat(input [1:0] b, input [11:0] r, input [9:0] c, input [15:0] p);
         reg [31:0] x;
         begin
-            x = {b, r, c, 8'd0} ^ {p, p};
+            x = {b, r, c, 8'd0} ^ {p, p} ^ 32'h2545F491;
             x = x * 32'h9E3779B1;
             pat = x[31:16] ^ x[15:0];
         end
@@ -80,30 +95,35 @@ module sdram_test #(
     localparam S_INIT = 0, S_IPRE = 1, S_IREF = 2, S_MRS = 3, S_REF = 4, S_ACT = 5,
                S_BURST = 6, S_BST = 7, S_PRE = 8, S_NEXT = 9;
     reg [3:0]  st = S_INIT;
-    reg [15:0] wait_c = 16'd20000;      // ~270 us power-up NOP
+    reg [15:0] wait_c = INIT_NOP;
     reg [3:0]  n = 4'd0;
     reg        writing = 1'b1;
     reg [1:0]  bank = 2'd0;
     reg [11:0] row = 12'd0;
     reg [10:0] col = 11'd0;
     reg [15:0] pass = 16'd0;
+    reg        pass_end = 1'b0;         // one clock after the last read burst of a pass
+    reg        raw_go = 1'b0;           // READ of bank 0 row 0 issued this cycle
+    reg        idle_go = 1'b0;          // a quiet cycle in the read phase (nobody drives)
     // read-expectation stream: valid/expected word for the column the READ produces, cycle by
     // cycle from the READ command on (e[k] = k cycles later)
     reg        rv0 = 1'b0;
     reg [15:0] re0;
-    reg [21:0] rad0;                    // {bank, row, col} for diagnostics
     reg [6:0]  rv = 0;
     reg [15:0] re [1:7];
-    reg [21:0] rad [1:7];
     integer k;
 
     always @(posedge clk) begin
         cmd(C_NOP);
         sd_a <= 12'd0;
         rv0 <= 1'b0;
-        if (wait_c != 16'd0)
+        pass_end <= 1'b0;
+        raw_go <= 1'b0;
+        idle_go <= 1'b0;
+        if (wait_c != 16'd0) begin
             wait_c <= wait_c - 16'd1;
-        else case (st)
+            if (st == S_ACT && !writing && wait_c == 16'd3) idle_go <= 1'b1;
+        end else case (st)
             S_INIT: begin                   // precharge each bank (A10 = 0)
                 cmd(C_PRE); sd_ba <= n[1:0]; n <= n + 4'd1; wait_c <= 16'd4;
                 if (n == 4'd3) begin st <= S_IREF; n <= 4'd0; end
@@ -124,6 +144,7 @@ module sdram_test #(
             S_BURST: begin
                 if (col == 11'd0) begin
                     cmd(writing ? C_WR : C_RD); sd_ba <= bank; sd_a <= 12'd0;
+                    if (!writing && bank == 2'd0 && row == 12'd0) raw_go <= 1'b1;
                 end
                 if (writing) begin
                     sd_dq_oe  <= col != 11'd1024;
@@ -131,7 +152,6 @@ module sdram_test #(
                 end else if (col != 11'd1024) begin
                     rv0 <= 1'b1;
                     re0 <= pat(bank, row, col[9:0], pass);
-                    rad0 <= {bank, row, col[9:0]};
                 end
                 if (col == 11'd1024) begin  // next cycle: BURST TERMINATE
                     cmd(C_BST);
@@ -150,10 +170,13 @@ module sdram_test #(
                     bank <= 2'd0;
                     if (row == ROWS) begin
                         row <= 12'd0;
-                        if (!writing) begin
+                        if (!writing) begin     // pass done: next hypothesis, re-initialise
                             pass <= pass + 16'd1;
                             passes <= passes + 16'd1;
-                            dqm_low <= ~dqm_low;
+                            pass_end <= 1'b1;
+                            st <= S_INIT;
+                            n <= 4'd0;
+                            wait_c <= 16'd7500; // ~100 us NOP with the new pin levels
                         end
                         writing <= ~writing;
                     end else
@@ -163,62 +186,83 @@ module sdram_test #(
             end
             default: st <= S_INIT;
         endcase
-        if (st == S_INIT && wait_c == 16'd20000) dqm_low <= 1'b1;   // first pass: DQM driven low
         // expectation pipeline
         rv <= {rv[5:0], rv0};
-        re[1] <= re0; rad[1] <= rad0;
-        for (k = 2; k <= 7; k = k + 1) begin
-            re[k] <= re[k-1];
-            rad[k] <= rad[k-1];
-        end
+        re[1] <= re0;
+        for (k = 2; k <= 7; k = k + 1) re[k] <= re[k-1];
     end
 
     // ---------------------------------------------------------------- compare
     // rv[k] is high k+1 cycles after the READ appeared on the pins (cycle T); dq_p then holds the
-    // pins at rising edge T+k+1 and dq_n2 those at falling edge T+k+0.5.
-    reg [31:0] pass_err [0:7];
-    reg [31:0] pe_snap [0:7];
-    reg [31:0] bestr = 32'd0;
-    reg [3:0]  mi = 4'd9;
-    reg        mode_snap = 1'b1;
-    reg        dqm_this = 1'b1;
-    reg        pass_d = 1'b0;
+    // pins at rising edge T+k+1 and dq_n2 those at falling edge T+k+0.5. One more register
+    // stage (c_*) before the compare.
+    reg [15:0] c_p = 0, c_n = 0;
+    reg [6:0]  c_v = 0;
+    reg [15:0] c_e [3:6];
     always @(posedge clk) begin
-        // rv[k-1] marks the expectation k cycles after the command left our register
-        if (rv[2] && dq_p  !== re[3]) begin err0 <= err0 + 1; pass_err[0] <= pass_err[0] + 1; end  // rise 3
-        if (rv[2] && dq_n2 !== re[3]) begin err1 <= err1 + 1; pass_err[1] <= pass_err[1] + 1; end  // fall 2.5
-        if (rv[3] && dq_p  !== re[4]) begin err2 <= err2 + 1; pass_err[2] <= pass_err[2] + 1; end  // rise 4
-        if (rv[3] && dq_n2 !== re[4]) begin err3 <= err3 + 1; pass_err[3] <= pass_err[3] + 1; end  // fall 3.5
-        if (rv[4] && dq_p  !== re[5]) begin err4 <= err4 + 1; pass_err[4] <= pass_err[4] + 1; end  // rise 5
-        if (rv[5] && dq_p  !== re[6]) begin err6 <= err6 + 1; pass_err[6] <= pass_err[6] + 1; end  // rise 6
-        if (rv[5] && dq_n2 !== re[6]) begin err7 <= err7 + 1; pass_err[7] <= pass_err[7] + 1; end  // fall 5.5
-        if (rv[4] && dq_n2 !== re[5]) begin                                                         // fall 4.5
-            err5 <= err5 + 1; pass_err[5] <= pass_err[5] + 1;
-            if (first_bad == 32'hFFFFFFFF) begin
-                first_bad <= {10'd0, rad[5]}; first_got <= dq_n2; first_exp <= re[5];
-            end
+        c_p <= dq_p;
+        c_n <= dq_n2;
+        c_v <= rv;
+        for (k = 3; k <= 6; k = k + 1) c_e[k] <= re[k];
+    end
+    reg [31:0] pe [0:7];                // this pass
+    reg [31:0] eh [0:31];               // [hyp*8 + point], last pass of each hypothesis
+    reg [15:0] ph [0:3];
+    reg [15:0] rawh [0:31];             // [hyp*8 + j]: j 0-5 raw r2..r7, 6 exp0, 7 exp1
+    reg [15:0] idleh [0:3];
+    reg [15:0] rs [0:7];                // raw shift for this pass
+    reg [15:0] e0 = 0, e1 = 0, idle_now = 0;
+    reg [3:0]  rcnt = 4'd0;
+    reg [3:0]  ci = 4'd8;               // copy-out counter after a pass
+    reg [1:0]  hdone = 2'd0;
+    always @(posedge clk) begin
+        if (c_v[2] && c_p != c_e[3]) pe[0] <= pe[0] + 1;   // rise 3
+        if (c_v[2] && c_n != c_e[3]) pe[1] <= pe[1] + 1;   // fall 2.5
+        if (c_v[3] && c_p != c_e[4]) pe[2] <= pe[2] + 1;   // rise 4
+        if (c_v[3] && c_n != c_e[4]) pe[3] <= pe[3] + 1;   // fall 3.5
+        if (c_v[4] && c_p != c_e[5]) pe[4] <= pe[4] + 1;   // rise 5
+        if (c_v[4] && c_n != c_e[5]) pe[5] <= pe[5] + 1;   // fall 4.5
+        if (c_v[5] && c_p != c_e[6]) pe[6] <= pe[6] + 1;   // rise 6
+        if (c_v[5] && c_n != c_e[6]) pe[7] <= pe[7] + 1;   // fall 5.5
+        // raw words of the first read burst: dq_p at rising edges 1..8 after the READ
+        if (raw_go) begin
+            rcnt <= 4'd1;
+            e0 <= pat(2'd0, 12'd0, 10'd0, pass);
+            e1 <= pat(2'd0, 12'd0, 10'd1, pass);
+        end else if (rcnt != 4'd0 && rcnt != 4'd9) begin
+            rs[rcnt[2:0] - 3'd1] <= dq_p;   // rcnt = 1 -> dq_p = pins at the READ edge + 1
+            rcnt <= rcnt + 4'd1;
         end
-        // At the end of each pass, add the best candidate's count to the total for the DQM mode
-        // the pass ran with: snapshot the counts, then find the minimum one per cycle (the
-        // pass is ~0.5 s long, so there is no hurry).
-        pass_d <= passes[0];
-        if (pass_d != passes[0]) begin
-            for (k = 0; k < 8; k = k + 1) begin
-                pe_snap[k] <= pass_err[k];
-                pass_err[k] <= 0;
-            end
-            mode_snap <= dqm_this;
-            dqm_this  <= dqm_low;
-            mi    <= 4'd0;
-            bestr <= 32'hFFFFFFFF;
-        end else if (mi < 4'd8) begin
-            if (pe_snap[mi[2:0]] < bestr) bestr <= pe_snap[mi[2:0]];
-            mi <= mi + 4'd1;
-        end else if (mi == 4'd8) begin
-            if (mode_snap) err_dqm0 <= err_dqm0 + bestr;
-            else           err_dqmz <= err_dqmz + bestr;
-            mi <= 4'd9;
+        if (idle_go) idle_now <= dq_p;
+        // end of pass: store this hypothesis's results, clear the pass counters
+        if (pass_end) begin
+            ci <= 4'd0;
+            hdone <= hyp;
+            hyp <= hyp + 2'd1;
+            ph[hyp] <= ph[hyp] + 16'd1;
+            idleh[hyp] <= idle_now;
+            rcnt <= 4'd0;
+        end else if (ci != 4'd8) begin
+            eh[{hdone, ci[2:0]}] <= pe[ci[2:0]];
+            pe[ci[2:0]] <= 32'd0;
+            rawh[{hdone, ci[2:0]}] <= ci[2:0] == 3'd6 ? e0 : ci[2:0] == 3'd7 ? e1 : rs[ci[2:0] + 3'd1];
+            ci <= ci + 4'd1;
         end
     end
-    initial for (k = 0; k < 8; k = k + 1) pass_err[k] = 0;
+    integer i;
+    initial begin
+        for (i = 0; i < 8; i = i + 1) begin pe[i] = 0; rs[i] = 0; end
+        for (i = 0; i < 32; i = i + 1) begin eh[i] = 0; rawh[i] = 0; end
+        for (i = 0; i < 4; i = i + 1) begin ph[i] = 0; idleh[i] = 0; end
+    end
+
+    // ---------------------------------------------------------------- display rows
+    genvar g;
+    generate for (g = 0; g < 8; g = g + 1) begin : g_rows
+        assign err_row[32*g +: 32] = eh[{hsel, g[2:0]}];
+    end endgenerate
+    assign raw_row = {idleh[hsel], rawh[{hsel, 3'd7}], rawh[{hsel, 3'd6}], rawh[{hsel, 3'd5}],
+                      rawh[{hsel, 3'd4}], rawh[{hsel, 3'd3}], rawh[{hsel, 3'd2}], rawh[{hsel, 3'd1}],
+                      rawh[{hsel, 3'd0}]};
+    assign hyp_passes = ph[hsel];
 endmodule

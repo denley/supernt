@@ -153,15 +153,29 @@ build/hwtest/sine.hex: tools/mksine.py
 	mkdir -p build/hwtest
 	python3 -I tools/mksine.py $@
 
-# Simulation of quartus/hwtest: a PIC32 stand-in on the link, one 720p frame per screen page
-# (build/sim/hwtest-P.png), the I2S stream decoded in both framings (quartus/hwtest/sim).
+# Simulation of quartus/hwtest: a PIC32 stand-in on the link that polls the status like the
+# console and only then sends a file (once with the stock answer, once waiting for 0x00 so the
+# candidate stepping has to find it), the SDRAM model, one 720p frame per screen page
+# (build/sim/hwtest-P-N.png), the I2S stream decoded in both framings (quartus/hwtest/sim).
 sim-hwtest: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
 	mkdir -p build/sim
 	iverilog -g2012 -o build/sim/hwtest.vvp -s tb quartus/hwtest/sim/tb.sv quartus/hwtest/sim/models.v \
-	  quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/i2s_test.sv \
+	  quartus/hwtest/sim/sdram_model.v quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/i2s_test.sv \
 	  quartus/common/link_logger.sv quartus/common/pad_test.sv quartus/common/sdram_test.sv
-	cd build/sim && vvp -n hwtest.vvp > hwtest.log && tail -3 hwtest.log
+	rm -f build/sim/hwtest-*.png
+	cd build/sim && vvp -n hwtest.vvp > hwtest.log && grep -v '^log ' hwtest.log | tail -12
+	grep -q '^LINK PASS' build/sim/hwtest.log
+	cd build/sim && vvp -n hwtest.vvp +want=00 +noframes > hwtest-want00.log && grep -v '^log ' hwtest-want00.log | tail -4
+	grep -q '^LINK PASS' build/sim/hwtest-want00.log
 	python3 -I quartus/hwtest/sim/check.py build/sim
+
+# Unit simulation of quartus/common/sdram_test.sv (quartus/hwtest/sim/tb_sdram.sv).
+sim-sdram:
+	mkdir -p build/sim
+	iverilog -g2012 -s tb_sdram -o build/sim/sdram_test.vvp quartus/hwtest/sim/tb_sdram.sv \
+	  quartus/hwtest/sim/sdram_model.v quartus/hwtest/sim/models.v quartus/common/sdram_test.sv
+	vvp -n build/sim/sdram_test.vvp | tee build/sim/sdram_test.log | grep -v '^VCD'
+	grep -q '^PASS' build/sim/sdram_test.log
 
 # SNES + SA-1 core (quartus/snes, notes/snes-quartus.md): the test ROM is built into block RAM,
 # so the Quartus build depends on it.
@@ -304,5 +318,5 @@ FORCE:
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE sim-snes sim-hwtest sim-sdram-rom sim-snes-sdram sim-link-loader
+.PHONY: all clean FORCE sim-snes sim-hwtest sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader
 .SECONDARY:

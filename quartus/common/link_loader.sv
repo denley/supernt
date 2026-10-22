@@ -3,7 +3,7 @@
 // notes/pic-link.md). The link slave is the stock core's port as quartus/common/link_logger.sv
 // implements it: A[2:0] register select, /WR and /RD strobes (active low), 8-bit data, a 32-bit
 // address register written a byte at a time (A = 0/1/4/5), data writes at A = 2 with
-// post-increment, A = 3 latch + increment, reads return the stock core's constants.
+// post-increment, A = 3 latch + increment, reads return the stock core's idle status.
 //
 // Every data byte whose address falls in [WIN_BASE, WIN_BASE + WIN_SIZE) is stored in SDRAM:
 // window offset o -> SDRAM word SD_BASE + o/2, low byte for even o, high byte for odd o (the
@@ -72,13 +72,11 @@ module link_loader #(
     wire rd_rise = !rd_d && rd_n;
 
     reg [31:0] lat = 32'd0;
-    function [7:0] rdval(input [31:0] ad);   // stock core's read constants (notes/pic-link.md)
-        case (ad)
-            32'h2004_0000: rdval = 8'h02;
-            32'h2008_0000: rdval = 8'h03;
-            32'h2009_0000: rdval = 8'h64;
-            default:       rdval = 8'h00;
-        endcase
+    // Status reads as the stock core answers them when idle (notes/pic-link.md, "Status
+    // 0x2004_0000"): 0x2xx4_xxxx = 0x03 (PLL reconfig idle, PLL locked), the rest 0x00. The
+    // PIC polls 0x2004_0000 before it sends a file and waits there on any other value.
+    function [7:0] rdval(input [31:0] ad);
+        rdval = ad[31:28] == 4'h2 && ad[19:16] == 4'h4 ? 8'h03 : 8'h00;
     endfunction
 
     reg        dbyte = 1'b0;            // a data byte for the window this cycle

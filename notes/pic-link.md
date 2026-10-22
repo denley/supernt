@@ -19,7 +19,12 @@ read and write strobes, 3 address lines), sampled by the FPGA at 42.686 MHz:
   "latch address and increment" (read prefetch).
 - Writes to register 2 are posted to the core's memory/register space at the 32-bit address;
   reads return a byte selected by the last latched address (SDRAM, internal registers, or 0).
-- The capture contains only writes (U21 never went low). In true bit order they are a register
+- **The PIC polls `0x2004_0000` (2 bytes) before it sends a file** (22 Oct console run, section
+  "Status 0x2004_0000"). It is the status of a reconfiguration block for the video PLL
+  (FPLL.000.037): bit 1 = PLL locked, bit 0 = a ready/idle flag; the same byte at every
+  `0x2xx4_xxxx` address. The stock idle answer decodes as 0x03 or 0x02 (one clear polarity
+  is ambiguous). hwtest v1 answered `02 00` and the PIC polled for the whole minute.
+- The 21 Oct capture contains only writes (U21 never went low). In true bit order they are a register
   set-up sequence at `0x1000_xxxx`/`0x1010_xxxx`/`0x111F_8100` followed by repeated writes to
   `0x1000_9018`/`0x1000_D218` whose data runs FF … FF, EE, DD, CC, … 11, 00. Nothing in it is the
   .spc file yet; the PIC wasn't stuck waiting on a read.
@@ -167,7 +172,77 @@ clock edge, x16 SDRAM DQ?, bits 1–0 read 0": the falling edge was the clock-se
 and bits 1–0 (A9, B10, A10) were missed because the tool ignored `DATAIN.3` and HMC-bypass
 routes without inverter lines.
 
-Which status bit the PIC polls (if any) is not known; nothing in the capture reads.
+The PIC polls `0x2004_0000` (2 bytes) before it sends a file: see "Status 0x2004_0000" below.
+Simulated idle values (whole link clock domain from power-up, nothing written, video PLL
+locked): `0x2004_xxxx` = 0x03 (or 0x02, see below), `0x2000`–`0x2003` and `0x2006`–`0x2009` =
+0x00 [likely].
+
+## Status 0x2004_0000 (the PIC's wait before the file)
+
+Console run 22 Oct 2026 (hwtest v1, `notes/buslog-2026-10-22-hwtest.md`): after its set-up
+writes (`0x1000_xxxx`/`0x1010_xxxx` registers, a 0x1EAF-byte block at `0x0000_0000`, 0x80 bytes
+at `0x111F_8100`, 0x2500 bytes at `0x1017_0800`, a 3-byte write `00 00 FF` to `0x1000_9018`
+repeated ~500 times), from T = 406 ms on the PIC only polls: address `0x2004_0000`, A = 3 latch
+(the "other writes" rate fits), two reads. v1 answered `02 00` (CRC-checked) and the PIC polled
+~305 000 times a second for the rest of the minute; the file never came. [confirmed: log]
+
+Decode (`~/scratch/hs/`, throwaway: `hs.py` = the link cone simulator of `~/scratch/netfix`
+extended with the status bit and the PLL ports, `scan*.py`, `dec*.py`, `lock0.py`, `seq.py`):
+
+- **Inputs** [confirmed]: the register cone of bit 0 (`014.016.2.FFT0`) on the link clock is 493
+  registers whose only outside inputs are the 13 link pins and `FPLL.000.037` `LOCK0` and
+  `PHASE_DONE0`. Nothing from the SNES, audio, SDRAM or video domains: the status depends only on
+  what the PIC writes and on the video PLL.
+- **The block is a reconfiguration controller for FPLL.000.037** (the video PLL: C1 = HDMI pixel
+  clock, C6 = 148.5 MHz) [confirmed: port routes]. Link-domain FFs drive its DPRIO port
+  (`DPRIO0_WRITE` `MLAB.009.017.1:FFT1`, `_READ` `.2:FFT1`, `_REG_ADDR[5:0]`, `_WRITEDATA[15:0]`
+  (`LAB.005`/`006`/`MLAB.004`/`016.014`), `_BYTE_EN[1:0]`, `_RST_N` `016.019.2.FFB1`,
+  `_SER_SHIFT_LOAD`, `_MDIO_DIS`; `DPRIO0_CLK` = the link clock), its dynamic phase shift
+  (`PHASE_EN0` `002.044.7.FFT0`, `UP_DN0` `MLAB.013.018.2:FFB0`, `CNT_SEL0[4:0]` `017.021.x`,
+  `PHASE_DONE0` back) and `NRESET0` (`010.018.2.FFB1`). DPRIO read data is not used.
+- **Writes** [likely: symbolic decode of the third address stage + simulation from the pins]:
+  - `0x1000_00C4` (the only address that loads them; bit 10 must be 0): D0 → `010.018.8.FFT1`, a
+    reset for the block (`016.019.1.B` = D0 | ~DPRIO_RST_N sync-clears its state machine, and it
+    async-clears the LOCK0 synchroniser `M009.016.x`); D1 → `010.018.2.FFB1` = the PLL's
+    `NRESET0` port.
+  - `0x1000_0500`–`0x1000_05FF`: 64 × 32-bit registers. Every write latches its byte by
+    address bits 1–0 into lane registers (`MLAB.018.016.x` lane 0, `MLAB.013.018.7/8` lane 1,
+    `LAB.014.018.x` lane 2, for any address), and a write with bits 1–0 = 3 inside the window
+    (`017.019.9.B`) commits the word to register bits 7–2. The shape (6-bit word address, 32-bit
+    data, phase-shift and counter registers) is that of Altera's `altera_pll_reconfig`
+    (0 mode, 1 status, 2 start, 3 N, 4 M, 5 C, 6 phase shift, ...) [guess].
+- **Read** [likely: simulation]: `0x2xx4_xxxx` (bits 31–28 = 2, 19–16 = 4; bits 1–0 and the
+  rest ignored, so `0x2004_0001` reads the same) = `{6'b0, bit 1, bit 0}`.
+  - Bit 1 follows `LOCK0` (simulated 0x01 with LOCK0 = 0, 0x03 with LOCK0 = 1).
+  - Bit 0 (`014.016.2.FFT0`) = `014.016.8.T | …` with `014.016.8.T` = ~(busy | DPRIO_RST_N &
+    ~D0(`0x1000_00C4`) & `010.018.0.FFT1` & LOCK0-synchronised), where `010.018.0.FFT1` is a
+    sticky "timer done" flag set when a small counter (`010.018.4/5/7`, ~64 clocks) runs out
+    after the block's reset synchroniser (`M009.019.5/6`) releases. What the counter does
+    depends on two clear readings the tool can't settle: its FFs have a sync clear (the
+    per-half `TSCLR_DIS`/`BSCLR_DIS` bits are clear exactly on them) and `netlist.py` also
+    reports an async clear "(?)" from the same `DATAIN.3` (`M009.019.6.FFB1`, the synchronised
+    reset release). Simulated from power-up, nothing written, LOCK0 = 1:
+    - sync clear as decoded (with the async clears as printed or inverted): the counter is held
+      at 0 once the reset is released, the flag never sets, bit 0 stays 1: **0x03** at
+      `0x2004_0000` and `0x2004_0001`;
+    - without that sync clear (async clear only, active in reset): the flag sets ~410 clocks
+      after configuration and bit 0 drops: **0x02 0x02**.
+
+    The first reading leaves a counter that can never count, which is odd; the second ignores
+    explicit sclr-enable bits. So the stock idle answer is **0x03 or 0x02 (both bytes)**
+    [likely for "one of the two", guess for which]. Either way bit 1 = 1 and both bytes are
+    the same, unlike v1's `02 00` (`0x2004_0001` read 0x00 there): if the PIC checks the second
+    byte, v1 failed on that alone. Bit 0 can also go 0 through the busy flag
+    (`014.019.1.FFT0`, set by a commit in the `0x1000_05xx` window); a simulated commit of the
+    start register (after mode = 0 and an M value) did not start any DPRIO traffic, so when the
+    stock core reports busy is open [guess].
+- **Reading**: the PIC checks the video PLL / reconfiguration status before it sends the file
+  and wrote nothing to the block before (the logged case) [likely]. hwtest v2 answers 0x03 at
+  every `0x2xx4_xxxx` address and steps to 0x02, 0x01, 0x00, 0xFF while the PIC keeps polling
+  without sending data (`link_logger.sv`, `notes/hardware-tests.md`); the console run settles
+  which one the PIC wants. `link_loader.sv` answers 0x03 until then.
+  Whether the PIC later reconfigures the video PLL through `0x1000_00C4`/`0x1000_05xx` (other
+  video modes?) and then waits for bit 0 again: watch for those addresses in the v2 log.
 
 ## The capture, decoded
 
@@ -213,11 +288,11 @@ data), so the file probably comes later than the 1024-event window. [guess]
    after /RD rises, see the FSM section; releasing sooner is safer and can't hurt the PIC.)
 2. A sink for the writes: at minimum a log or memory keyed by the 32-bit address, so we can see
    where the file goes (expect a long A=2 burst into one region).
-3. Reads: until the PIC is seen reading, return 0x00 (or a recognisable pattern) and log the
-   read addresses. **Changed:** this used to say "return the stock core's constants for
-   `0x2008_0000`/`0x2009_0000`", but those constants were a decode artefact; the stock status
-   bytes are registers whose contents aren't decoded. Unknown whether the PIC reads anything
-   before sending a file.
+3. Reads: answer the stock status at `0x2xx4_xxxx` (0x03 or 0x02, both bytes; hwtest v2
+   finds out which), 0x00 elsewhere. The PIC polls `0x2004_0000` before it sends a file and
+   waits on a wrong answer (22 Oct). The
+   other status bytes are registers whose meaning isn't decoded; 0x00 is their idle value in
+   the simulation.
 
 **Next experiment** (buslog v2): log U22 edges as well, decode transactions in the FPGA
 ({ADDR, D, R/W} per strobe instead of raw S changes), and keep only address changes plus a byte
@@ -233,8 +308,9 @@ Also drive OE on /RD with a constant (e.g. 0xA5) to see whether and when the PIC
 - Write decode: where each `0x1000_xxxx`/`0x1010_xxxx`/`0x111F_xxxx` write lands (register
   enables `M018.016.1.T`, `024.020.x`, `024.022.x`, `M023.020.3.T` … decode a third address
   stage `021.019.x`, not traced).
-- What the open-drain group read back at `0x01xx_xxxx` is for, and the meaning of the
+- What the open-drain group read back at `0x01xx_xxxx` is for, and the meaning of the other
   `0x2xxx_xxxx` status registers.
+- When the PLL reconfiguration block reports busy (bit 0 = 0) and whether the PIC ever uses it.
 - Whether the PIC waits on P14 or another pin.
 
 ## Tool (`tools/netlist.py`)

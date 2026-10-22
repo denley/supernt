@@ -20,6 +20,8 @@ independent checks; **[guess]** = plausible, not checked.
   then PRECHARGE ALL. tRP = tRCD = 3 cycles (25.9 ns). Refresh: one AUTO REFRESH every **2400
   cycles = 20.7 µs** (slower than the 15.6 µs that 4096 rows / 64 ms needs).
 - CKE and DQM are not driven by the controller logic (tied on the board or by a constant pin) [likely].
+  AB10, a constant output next to the clock, is **low** in spc.cor [likely]; hwtest v1 drove it
+  high and the chips never answered ("Constant pins" below).
 - A second, independent controller at 148.5 MHz drives top-bank and 3A pins (probably the x16
   AS4C8M16SA), partly decoded below.
 
@@ -50,8 +52,8 @@ PRE 0010, REF 0001, MRS 0000, deselect 1xxx.
 | AB11 | 3B | GPIO DDIO (`OUTREG_MODE_SEL DDR`), no data routed, `DATAOUT.1` inverted | CLK | confirmed (clock); polarity likely | IOE `CLKOUT.0` ← CMUXVG.025.045.3 = FPLL.054.037 C8 |
 | D3 E2 L2 L1 G2 G1 C2 C1 | 2A | out: M10K.011.004–007 port B; OE: fabric FFs | chip A DQ0–7 (bit order unknown, irrelevant) | confirmed | |
 | AB5 AB6 AB7 AA7 AB8 AA8 AA9 AA10 | 3B | out: M10K.022.004–007 port B; OE: fabric FFs | chip B DQ0–7 (bit order unknown) | confirmed | |
-| AB10 | 3B | constant output (`DATAOUT.0` inverted, nothing routed), same IOE pair as AB11 | CKE? | guess | |
-| Y3 (2A), W9 W8 (3A), Y9 Y10 R11 R10 Y11 (3B) | | open-drain outputs, data not routed | DQM / tie-offs? | guess | constant; next to the SDRAM pins; value of an unrouted DATAOUT unknown |
+| AB10 | 3B | constant output (`DATAOUT.0` inverted, nothing routed), same IOE pair as AB11 | constant **0** [likely]; DQM of both chips? (not CKE: see "Constant pins") | guess | |
+| Y3 (2A), W9 W8 (3A), Y9 Y10 R11 R10 Y11 (3B) | | open-drain outputs, data not routed | released (output 1) [likely]; tie-offs? | guess | constant; next to the SDRAM pins; see "Constant pins" |
 
 Notes on the table:
 
@@ -180,6 +182,53 @@ top-bank pins, not just defaults:
   G6 (open drain); H18 ← CMUXVG.025.045.0 (FPLL.054.037 C7, 12.29 MHz) and J19 ← CMUXVG.025.045.2
   (C5, 3.07 MHz) as clock outputs; inputs B12 C16 F12 J11 J18 via `IOINTDQDIN`.
 
+## Constant pins: AB10 and the open-drain group (after hwtest v1, Oct 2026)
+
+hwtest v1 on the console (22 Oct, `notes/hardware-tests.md`): all eight capture points wrong on
+16 776 960 of 16 777 216 words every pass (256 matches = chance for a 16-bit compare against a
+constant), with the open-drain pins low or released alike: the chips never answered. v1 drove
+AB10 **high** as "CKE".
+
+What spc.cor does with these pins (`build/spc.bt`, the `i`/`s` lines):
+
+| pin(s) | OE | DATAOUT | other |
+|---|---|---|---|
+| AB10 | `OEIN.0` unrouted, inverter set (always-on output, like every output) | `DATAOUT.0` unrouted, **inverter set** | `IOCSR_STD DIS`, same IOE pair as AB11 |
+| Y3 W9 W8 Y9 Y10 R11 R10 Y11 | same | `DATAOUT.0` unrouted, **no inverter** | `USE_OPEN_DRAIN 1` |
+| AB11 (clock) | same | DDIO, `DATAOUT.1` inverted, `.0` not, both unrouted | clock = the two levels alternating |
+
+- Fabric convention: an unrouted input reads 1 (LUT indexing, checked cell by cell against
+  nextpnr designs that run on the console), and the inverters are real (data pins that work,
+  e.g. the link data and our video, have no DATAOUT inverter). With that, the OE inverter turns
+  the unrouted 1 into the active-low output enable (consistent with the link OE FF driving the
+  pins when it is 1), **AB10 is a constant 0** and **the open-drain pins output 1, i.e. are
+  released** [likely]. AB11's two DDIO levels differ either way.
+- Check against v1: under the opposite convention (unrouted = 0) the stock levels would be AB10
+  = 1 and the open-drain pins driven low, which is exactly v1's "DQM low" passes, and those
+  failed completely. So v1 never ran the stock configuration; the decode above has not been
+  tried [likely].
+- The stock core needs a working SDRAM, so whatever AB10 is, low is its working level: not CKE
+  (CKE low = power-down/clock suspend, nothing would work; CKE is then tied high on the board),
+  but plausibly the **shared DQM** of both x8 chips (TSOP-54: DQM pin 39 is next to CLK, 38,
+  and AB10 shares the IOE pair with AB11 = CLK) [guess]. DQM high masks writes and turns the
+  read outputs off, which is what v1 saw.
+- Other pins with AB10's pattern (constant output, unrouted DATAOUT, inverter set, i.e.
+  constant 0): R5 R6 U8 U7 T8 T7 V6 U6 V10 V9 U10 T10 P12 R12 N9 P9 (3A/3B), T13 Y15 Y14 V15
+  V14 Y17 Y16 T14 W19 V16 Y19 V19 U16 (4A), H13 B5 A14 G16 K20 K19. Unknown roles; not driven by
+  our cores.
+- The "first f4.5 miss at 000000 got 0000 expected 0000" line of v1: pass 0 expected word for
+  bank 0 row 0 column 0 was the hash of 0, i.e. 0000, and the miss was counted while the
+  recorded word equals the expected one. With the chips not driving, the falling-edge capture
+  FF samples a floating bus; a metastable sample can resolve differently in the compare and in
+  the "got" register one stage later [guess]. v2 adds a register stage before the compare,
+  uses a pattern that is never 0000 for the first word, and shows raw words instead.
+
+hwtest v2 (`quartus/common/sdram_test.sv`) runs one hypothesis per pass, re-initialising the
+chips each time: 0 = AB10 low + open-drain released (stock as decoded), 1 = AB10 low +
+open-drain low, 2 = AB10 high + released, 3 = AB10 high + low (v1's two), with per-hypothesis
+error counts at the eight capture points and the raw bus words after the first READ. All four
+only use levels spc.cor or v1 already put on these pins.
+
 ## Method
 
 - Seeds: the 18 outputs + DQ OE/CE. `tools/netlist.py` cone back to C1 FFs in the region; other
@@ -205,9 +254,9 @@ top-bank pins, not just defaults:
 
 ## Open questions
 
-- What drives CKE and DQM: board ties, AB10 (constant output next to AB11), or the undriven
-  open-drain pins (Y3 W9 W8 Y9 Y10 R11 R10 Y11)? Their constant values are unknown (unrouted
-  `DATAOUT` level not calibrated). A continuity check on U5/U16 (TSOP-54 x8: CKE pin 37, DQM pin 39; check the datasheet) answers it.
+- What drives CKE and DQM: AB10 is a constant 0 in spc.cor [likely] (so not CKE; DQM?), the
+  open-drain pins are released [likely]; hwtest v2's hypotheses test it. A continuity check on
+  U5/U16 (TSOP-54 x8: CKE pin 37, DQM pin 39; check the datasheet) answers it directly.
 - BA0 vs BA1 on AA15/AB15; A11 = N2 is by elimination. Neither matters functionally.
 - A0–A6 identity (needed only for a different MRS than Analogue's): verify on hardware.
 - DDIO high/low data index (AB11/H8 polarity).

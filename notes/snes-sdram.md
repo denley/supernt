@@ -196,9 +196,13 @@ Fine adjustment: `SDRAM_CAP_OFFSET_PS` moves the capture in 208 ps steps; one st
 from the read-data input setup (spare slack on both under "Build results"). The other two
 phases have no slack to give.
 
-Also from hwtest: **DQM**: `DQM_LOW` in `snes_sdram_top.sv` (1 = hold the candidate pins low,
-default; 0 = release them) if only one of `err_dqm0`/`err_dqmz` is clean. And `AUD_FRAMING` /
-`PAD_CFG` as for `quartus/snes`.
+Also from hwtest: **AB10 and DQM**: hwtest v1 (22 Oct 2026) got no SDRAM response at all with
+AB10 high (as this core is built); spc.cor drives AB10 low (`notes/sdram.md`, "Constant
+pins"). hwtest v2 tries AB10 low/high × open-drain pins released/low; set `AB10_LEVEL` (built
+with 1) and `DQM_LOW` (1 = hold the candidate pins low, built default; 0 = release them, the
+stock level) to the clean hypothesis and rebuild before running this core: as built it will most
+likely fail on the console. `PAD_CFG` 0 is confirmed; `AUD_FRAMING` is not (v1 was silent in
+both framings).
 
 ## Boot copy
 
@@ -211,8 +215,9 @@ synchronised to clk_sys, starts the `RESET_CYCLES` count before the core leaves 
 ## Link loader (`link_loader.sv`, not wired in)
 
 The stock link slave as `link_logger.sv` (A[2:0], /WR, /RD, 32-bit address register written a
-byte at a time at A = 0/1/4/5, data at A = 2 with post-increment, A = 3 latch, the stock read
-constants). Data bytes with addresses in [`WIN_BASE`, `WIN_BASE + WIN_SIZE`) go to SDRAM word
+byte at a time at A = 0/1/4/5, data at A = 2 with post-increment, A = 3 latch; status reads
+answer like the stock core when idle, 0x03 at `0x2xx4_xxxx`, which the PIC polls before it sends
+a file, `notes/pic-link.md`). Data bytes with addresses in [`WIN_BASE`, `WIN_BASE + WIN_SIZE`) go to SDRAM word
 `SD_BASE + offset/2`, low byte for even offsets. Byte pairing: a pending half word waits for its
 partner, also across address-register writes (chunked transfers with odd lengths still give
 whole words); it is written by read-modify-write (aux read port) when a byte for another word
