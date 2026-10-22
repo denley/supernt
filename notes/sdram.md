@@ -26,8 +26,9 @@ independent checks; **[guess]** = plausible, not checked.
 - **The page has 512 columns** [confirmed: hwtest v2, "hwtest v2 result" below]: a full-page
   burst wraps after 512 words, which is why the stock controller only uses 512-word bursts.
   Chip B returns correct data with our 74.25 MHz controller at capture point r4 / f3.5.
-  **Chip A (2A) has never driven the bus** in any run; its enable is probably one of the
-  constant pins spc.cor drives and our cores leave as pull-up inputs (hwtest v3 finds which).
+  **Chip A (2A) has never driven the bus** in any run, also not with any of spc.cor's
+  constant pins at their stock level (hwtest v3); chip B alone, or the x16 chip, are the
+  fallbacks until a continuity check finds chip A's enable.
 - A second, independent controller at 148.5 MHz drives top-bank and 3A pins (probably the x16
   AS4C8M16SA), partly decoded below.
 
@@ -296,6 +297,30 @@ Tri-stated in spc.cor (OE off) on the bottom edge: M7 U12 U13 (and W16, the cloc
   switched: 4A is the PIC link's bank; K19/K20/J17 sit next to the audio pins).
 - Only spc.cor's levels are ever driven on these pins; "released" is what v1/v2 already did.
 
+## hwtest v3 result (22 Oct 2026): chip A's enable is none of the constant pins
+
+Console run of hwtest v3 (`notes/buslog-2026-10-22-hwtest.md`, third run; page 4 at f044 of
+`IMG_3062.mov`), 512-word bursts, errors per chip in each hypothesis's last pass:
+
+- **Chip B (high byte): 000000 errors at f3.5 and r4 in every hypothesis except 13** (AB10
+  high). So chip B works completely with 512-column pages, AB10 low, our controller and capture
+  point r4 (f3.5 equally) [confirmed]; none of the 19 3A/3B constant pins (stock level or
+  released) and none of the open-drain states affect it.
+- **Chip A (low byte): ~7F8000 errors (every word, apart from chance matches of a constant
+  byte) in all 16 hypotheses**: it never drives with any of the 19 3A/3B constants at its stock
+  level or released, nor with Y3 or the whole open-drain group low, and the 24 4A/7A constants
+  were held at their stock level throughout. So its enable (CKE/DQM/CS or a missing supply/
+  strap) is not an FPGA pin that spc.cor drives to a constant [likely].
+- What is left: the chip's CKE/DQM/CS# may be strapped or wired to a pin that spc.cor drives
+  from logic we misattributed, or chip A may be unpopulated/unused by the stock core (spc.cor's
+  DQ OE logic does drive its DQ pins, so the stock core at least writes them). **A continuity
+  check on chip A's CKE, DQM and CS# pins** (TSOP-54 x8; see "Open questions") is the direct
+  answer.
+- Fallbacks for the SNES core: **chip B alone as 8-bit memory** (half the bandwidth of the
+  pair, two accesses per 16-bit ROM word; still enough for a SNES ROM at 74.25 MHz), or the
+  **x16 chip** on the top bank ("Top bank" above; its controller is not decoded far enough to
+  drive yet).
+
 ## Method
 
 - Seeds: the 18 outputs + DQ OE/CE. `tools/netlist.py` cone back to C1 FFs in the region; other
@@ -321,9 +346,9 @@ Tri-stated in spc.cor (OE off) on the bottom edge: M7 U12 U13 (and W16, the cloc
 
 ## Open questions
 
-- Chip A's enable (DQM/CKE/CS): hwtest v3's hypotheses over the 3A/3B constant pins. AB10 = chip
-  B's DQM [likely]. A continuity check on the chips (TSOP-54 x8: CKE pin 37, DQM pin 39; check
-  the datasheet) answers it directly.
+- Chip A's enable (DQM/CKE/CS): not one of the 3A/3B/4A/7A constant pins (hwtest v3). AB10 =
+  chip B's DQM or CKE [likely]. A continuity check on the chips (TSOP-54 x8: CKE pin 37, DQM pin
+  39; check the datasheet) answers it directly.
 - The part: 512-column page (v2), so not 4096 × 1024; a 13th row bit?
 - BA0 vs BA1 on AA15/AB15; A11 = N2 is by elimination. Neither matters functionally.
 - A0–A6 identity (needed only for a different MRS than Analogue's): verify on hardware.

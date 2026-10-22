@@ -23,9 +23,15 @@ read and write strobes, 3 address lines), sampled by the FPGA at 42.686 MHz:
   "Status 0x2004_0000"), right after writing 0 to `0x1000_0500`. It is the status of the video
   PLL's (FPLL.000.037) reconfiguration controller, which is Altera's `altera_pll_reconfig`:
   bit 1 = PLL locked, bit 0 = the controller's `mgmt_waitrequest`; the same byte at every
-  `0x2xx4_xxxx` address. **Stock idle answer: 0x02 0x02** [likely, from Altera's RTL; was
-  "0x03 or 0x02"]. hwtest v1 answered `02 00`, v2 `03 03`; the PIC polled for the whole run
-  both times. hwtest v3 answers from a real PLL + that IP, with a stepped fallback.
+  `0x2xx4_xxxx` address. **The PIC wants 0x02 0x02** [confirmed: hwtest v3 on the console,
+  22 Oct, the fallback's 02 got it past the poll at once]. hwtest v1 answered `02 00`, v2
+  `03 03`, v3's emulated IP `03 03` (stuck waitrequest); the PIC polled on each time.
+- **After the poll** the PIC reprograms the video PLL through the block (25 register writes,
+  `0x1000_00C4` 4 times; the HDMI signal drops and comes back), writes more set-up blocks, and
+  then runs the **SPC player's UI loop** (every ~32 ms: 01 → `0x1000_D120`, read 2 bytes at
+  `0x2000_0000` and at `0x2001_0000`, twice). Those are the pad 1 buttons
+  (`notes/controllers.md`, "Link registers"); the file didn't come within 150 s while v3
+  answered 00 there (section "After hwtest v3").
 - The 21 Oct capture contains only writes (U21 never went low). In true bit order they are a register
   set-up sequence at `0x1000_xxxx`/`0x1010_xxxx`/`0x111F_8100` followed by repeated writes to
   `0x1000_9018`/`0x1000_D218` whose data runs FF … FF, EE, DD, CC, … 11, 00. Nothing in it is the
@@ -163,7 +169,7 @@ names only]:
 |---|---|
 | `0x0?xx_xxxx`, bit 24 = 0, bits 31–28 = 0 | bits 7…0 = regs `026.017.9.FFB1` `026.017.2.FFT1` `026.017.3.FFB1` `026.017.4.FFB1` `025.018.0.FFT1` `025.018.4.FFB1` `025.019.9.FFT1` `025.019.1.FFB1` |
 | bit 24 = 1, bits 31–28 = 0 (`0x01xx_xxxx`) | the eight open-drain pins read back, bit 7…0 = B11 B12 C16 A12 A8 A9 B10 A10 (`notes/controllers.md`): IOE input register (`DATAIN.3`), then a fabric FF on `CMUXVG.021.000.3` (148.5 MHz, rising edge, enable `026.041.6.FFT1`), then the link clock |
-| `0x2xx0_0000` … by bits 19–16 | internal status regs: `0x2000_0000`, `0x2001_0000`, `0x2002_0000` full bytes and `0x2003_0000` bits 2–0 from `025.015.x`/`025.018.x`/`026.017.x`; `0x2004_0000` bit 1 includes `M013.020.5.FFB0` (= FPLL.000.037 LOCK0, synchronised), bit 0 `014.016.2.FFT0`; `0x2006_0000` bit 3 `025.018.7.FFT1`, bit 1 as `0x2004`; `0x2008_0000` bits 1–0 `025.019.0.FFT1` `025.019.1.FFT1`; `0x2009_0000` full byte from `026.017.x`/`025.018.x`/`025.015.6.FFB1` |
+| `0x2xx0_0000` … by bits 19–16 | internal status regs: `0x2000_0000`, `0x2001_0000`, `0x2002_0000` full bytes and `0x2003_0000` bits 2–0 = **the controller poller's capture** (`0x2000` = buttons 7–0, `0x2001` bits 3–0 = buttons 11–8, 1 = pressed; `notes/controllers.md`, "Link registers"); `0x2004_0000` bit 1 includes `M013.020.5.FFB0` (= FPLL.000.037 LOCK0, synchronised), bit 0 `014.016.2.FFT0`; `0x2006_0000` bit 3 `025.018.7.FFT1`, bit 1 as `0x2004`; `0x2008_0000` bits 1–0 `025.019.0.FFT1` `025.019.1.FFT1` = the poller's device type (01 = standard pad); `0x2009_0000` full byte from `026.017.x`/`025.018.x`/`025.015.6.FFB1` (held registers `021.013.x`, not the pad) |
 | anything with bit 28, 30 or 31 set (`0x1xxx_xxxx` …) | 0x00 |
 
 **Changed:** the earlier table had constant bits (region `0x0?` bit 6 = 1 and bit 1 = 0;
@@ -293,6 +299,35 @@ reads until it is armed (both strobes high for 1 µs, or a write strobe with /RD
 holds /RD low until it sets up its port, which looked like a read at power-up. `link_loader.sv`
 now answers 0x02.
 
+### After hwtest v3 (22 Oct, third console run)
+
+v3 (`notes/buslog-2026-10-22-hwtest.md`, third part; video `IMG_3062.mov`, 155 s):
+
+- **Candidate 0 (the emulated PLL + Altera reconfiguration IP) answered `03 03`**: its
+  waitrequest stayed 1 after the PIC's write of 0 to register 0 (`pending` 1: the Avalon write
+  never completed). In the iverilog model the same IP drops waitrequest after 415 clocks; on
+  the FPGA it never did. Not chased further (v4 starts with 02 and shows whether waitrequest
+  was ever 0); suspects: the IP's `dps_done`/`locked` inputs from `reconfig_from_pll`.
+- After 5 s the fallback stepped to **candidate 1 = `02 02`** (T 0x14A2 = 5.4 s) and the PIC
+  moved on at once: answer fixed with candidate 1 at T 0x14AE. [confirmed]
+- Then: 25 commits to the `0x1000_05xx` block (last register 2 = start, data 0) and 4 writes to
+  `0x1000_00C4` (C4 = 00 at the end), a short HDMI drop and recovery (the video PLL being
+  retuned and the HDMI set-up redone, presumably), and five big write runs: `0x1006_0000` 0x2000
+  bytes (CRC B5CFAF0C, T 0x14AC), `0x1010_0000` 0x28 (7B4EDA37, as before the poll),
+  `0x1001_3000` 0x300 (D0C0DF2A), `0x111F_8100` 0x80 (FCB64B27, as before), `0x1018_0000` 0x1000
+  (CE6B18CC, T 0x14F1). None of them is part of the chord .spc (every CRC window checked).
+- From then on the UI loop above, for the rest of the run; the 1024-entry log was full after
+  ~10 s (5 entries per loop). Video PLL: out 148.5 MHz before and after (024413/024414 kHz), H16
+  74.25 MHz.
+- The PIC never sent the file. With the loop reading the pad, it most likely waits for a
+  button (a file list waiting for A/START?), and v3 answered 00 = nothing pressed.
+
+hwtest v4: answers the pad registers like the stock core (real pad 1, plus automatic "virtual"
+presses once the UI has waited 10 s: A, START, X, Y, L, R, UP, DOWN, LEFT, RIGHT, SELECT, B,
+0.5 s each, 3 s apart, until a write run of ≥ 256 bytes starts; the screen shows which press
+preceded it). Reads of `0x2000`/`0x2001` are counted, not logged, and the log keeps its first
+512 entries plus a ring of the newest 512, so the file transfer shows on pages 2 and 3.
+
 ## The capture, decoded
 
 Logger events `S:DD+TT`. S = {AB20 AA20 AA19 U21} = {A2 A1 A0 /RD}; the cycle 3 → 9 → B → 5 → 1
@@ -337,11 +372,12 @@ data), so the file probably comes later than the 1024-event window. [guess]
    after /RD rises, see the FSM section; releasing sooner is safer and can't hurt the PIC.)
 2. A sink for the writes: at minimum a log or memory keyed by the 32-bit address, so we can see
    where the file goes (expect a long A=2 burst into one region).
-3. Reads: answer the stock status at `0x2xx4_xxxx` (0x02, both bytes [likely]; hwtest v3
-   checks it on the console), 0x00 elsewhere. The PIC polls `0x2004_0000` before it sends a
-   file and waits on a wrong answer (22 Oct: `02 00` and `03 03` both failed). The
-   other status bytes are registers whose meaning isn't decoded; 0x00 is their idle value in
-   the simulation.
+3. Reads: answer the stock status at `0x2xx4_xxxx` (0x02, both bytes [confirmed, hwtest v3]),
+   the pad at `0x2000`/`0x2001` (buttons, 1 = pressed) and `0x2008` = 01 (standard pad),
+   0x00 elsewhere. The PIC polls `0x2004_0000` before it sends a file and waits on a wrong
+   answer (22 Oct: `02 00` and `03 03` both failed, `02 02` passed), then its player UI reads the
+   pad. The other status bytes (`0x2006`, `0x2009`) are registers whose meaning isn't decoded;
+   0x00 is their idle value in the simulation.
 
 **Next experiment** (buslog v2): log U22 edges as well, decode transactions in the FPGA
 ({ADDR, D, R/W} per strobe instead of raw S changes), and keep only address changes plus a byte
@@ -359,8 +395,9 @@ Also drive OE on /RD with a constant (e.g. 0xA5) to see whether and when the PIC
   stage `021.019.x`, not traced).
 - What the open-drain group read back at `0x01xx_xxxx` is for, and the meaning of the other
   `0x2xxx_xxxx` status registers.
-- Whether 02 02 is really what the PIC waits for (hwtest v3), and whether it reprograms the
-  video PLL later (v3 shows the block writes and the PLL's output frequency).
+- Why the emulated reconfiguration IP's waitrequest stayed 1 on the FPGA (v3).
+- What `0x1000_D120` = 01 (once per UI loop) and the post-poll blocks (`0x1006_0000`,
+  `0x1001_3000`, `0x1018_0000`) are; which button makes the player send the file (hwtest v4).
 - Whether the PIC waits on P14 or another pin.
 
 ## Tool (`tools/netlist.py`)

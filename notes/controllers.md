@@ -11,8 +11,10 @@ evidence), **[likely]** (clean decode, one line of evidence), **[guess]**.
 - **The FPGA reads the pad, not the PIC32** [likely]. spc.cor contains a self-contained poller:
   one serial input (T12) and two output nets (P14, and J13 + K16 driven from one FF). It runs
   on its own after power-up and needs no input from the PIC. The captured bits go into
-  registers that the PIC can read over the bank-4A link (`notes/pic-link.md`, status reads at
-  `0x2000_0000`–`0x2003_0000`).
+  registers that the PIC reads over the bank-4A link: **`0x2000_0000` = buttons 7–0 (RIGHT LEFT
+  DOWN UP START SELECT Y B), `0x2001_0000` bits 3–0 = buttons 11–8 (R L X A), 1 = pressed**,
+  `0x2008_0000` = device type (01 = standard pad) [likely; "Link registers" below]. The SPC
+  player's UI loop reads `0x2000`/`0x2001` every ~16 ms (hwtest v3, 22 Oct).
 - **Only one data line is read.** No other pin in spc.cor behaves like a pad input. Port 2
   data, the D1 lines and IOBit are either on pins spc.cor leaves unconfigured or not wired to
   the FPGA. Their pins are unknown.
@@ -107,6 +109,66 @@ LAB.029.011.2:FFT0 LAB.029.012.5:T LAB.029.012.5:B LAB.024.015.5:T`). Its only l
     takes earlier stages from the link-clock FFs in `025.015`, or the device isn't a plain
     16-bit 4021 read. Not followed further.
 
+## Link registers (decoded 22 Oct 2026, after hwtest v3)
+
+hwtest v3 showed the SPC player's UI loop: every ~32 ms the PIC writes 01 to `0x1000_D120`, then
+reads 2 bytes at `0x2000_0000` and 2 bytes at `0x2001_0000`, twice (`notes/pic-link.md`, "After
+hwtest v3"). hwtest v3 answered 00 there, so no button reached the player. Traced from the
+read mux (`~/scratch/netfix/readmap-new.txt`) back to the poller (`~/scratch/v4/chain.py`,
+`srchain.py`, `padmap3.py`, throwaway; the last is `padmap.py` with `LAB.024.014`, which the
+earlier attempt had left out, and a 4021 model fed from the decoded P14/J13 waveform):
+
+- **The shift register is 33 stages long** [likely]: T12 → `029.003.2.FFB0` (= ~T12) → stage 1
+  `024.015.0.FFB1` → … → stage 22 `024.015.7.FFT0` → stage 23 `024.014.9.FFT1` … → stage 33
+  `024.014.5.FFB1` (all on the poller clock, enable `029.012.5.B`, one shift per clock low
+  pulse). After the 33 samples of a poll, sample k (pad bit k, 1 = line low = pressed) sits in
+  stage 33 − k.
+- **Capture** (enable `029.012.5.T`, once per poll, after the last shift) copies stages into two
+  groups of registers, then one link-clock FF per bit feeds the read mux (no enable: the PIC
+  always reads the newest poll):
+
+  | read | bit 7 … bit 0 = pad sample | cleared when |
+  |---|---|---|
+  | `0x2000_0000` | 7 6 5 4 3 2 1 0 (RIGHT LEFT DOWN UP START SELECT Y B) | not a standard pad and not device A |
+  | `0x2001_0000` | 19 18 17 16, then 11 10 9 8 (R L X A) | high nibble: not device A; low nibble: as 0x2000 |
+  | `0x2002_0000` | 27 … 20 | not device A |
+  | `0x2003_0000` | bits 2–0 = samples 31, 29, 28 | not device A |
+  | `0x2008_0000` | bit 1 = "not a standard pad", bit 0 = "not device A" | – |
+
+  Capture registers: `0x2000` bits 7…0 ← `024.014.6.FFB0` `.7.FFT0` `.7.FFB0` `.4.FFT1` `.2.FFB0`
+  `.1.FFB0` `.3.FFB0` `.3.FFT0`; `0x2001` bits 3…0 ← `024.014.2.FFT0` `.1.FFT0` `.6.FFT0`
+  `.4.FFB0`; then the link-clock FFs listed in the read map (`025.018.x`, `026.017.x`,
+  `025.015.x`, `029.020.8.FFB1`). Address bits other than 31–28, 24 and 19–16 are ignored, so the
+  PIC's second byte at `0x2000_0001` is the same byte again.
+- **Device checks** at capture (stages after 33 shifts): "standard pad" = samples 12–15 = 0 and
+  16–32 = 1 (`024.015.2.T`, among others `024.015.8.FFT1`, `.4.T`, `.3.T`, `.1.T`, `.0.B`); device
+  A = samples 12 = 0, 13 = 1, 14 = 15 = 0, 30 = 0, 32 = 1 (`024.015.5.T`), a 4-bit ID 0100 in bits
+  12–15 (mouse-like: the extra bytes would be its data) [likely for the terms, guess for the
+  device]. Simulated with the 4021 model: an idle pad (FFFF0000 in pad_test terms) passes the
+  standard check, so the stock core answers **0x2000 = 00, 0x2001 = 00, 0x2002 = 00, 0x2003 = 00,
+  0x2008 = 01** with a pad and no button held; with nothing recognised (no pad: all samples 0,
+  or a 34-bit device) everything reads 0 and `0x2008` = 03.
+- **Buttons 5–11 simulate as expected** [likely]: one button per run lands in exactly the
+  register above (bit 5 → `0x2000` bit 5 … bit 11 → `0x2001` bit 3); bits 12–15 make the
+  standard check fail (everything cleared).
+- **Buttons 0–4 (B Y SELECT START UP) never arrive in the simulation**: stage 29
+  (`024.014.0.FFB0`/`FFB1`) is decoded with a sync clear from the validity term `024.015.8.T`,
+  which is 1 at every shift (the pattern only lines up after the last one), so samples 0–4 are
+  zeroed on their way to stages 29–33. A player that could never see B or START is implausible,
+  so this clear is most likely a misreading of the LAB-wide SCLR on that ALM half (the capture
+  registers in the same LAB do use it) [guess]. By stage position, 0x2000 bits 4–0 = buttons
+  4–0 [likely]; hwtest v4 answers all 12 buttons that way and shows on screen what it answers.
+- `0x1000_D120` (written 01 before each UI read pair) does not touch any of this: the poller's
+  register cone (138 FFs) has T12 as its only input [confirmed: cone and simulation], and the
+  link-domain copies have no enable. In the link domain a `0x1000_D120` write only loads the
+  shared lane register `MLAB.018.016.x` (lane 0, used by the reconfiguration block's
+  `0x1000_05xx` window); where the posted write goes on the memory side isn't traced. It is not
+  a latch or strobe for the pad [likely].
+- Other `0x2xxx` registers for the record: `0x2004` = video-PLL reconfiguration status
+  (`notes/pic-link.md`); `0x2006` bit 3 from `M013.031.6.FFB0` and bit 1 = `0x2004` bit 1;
+  `0x2009` = 8 register bits `021.013.0–9` that hold their value (a writable register read
+  back?), not the pad. Not traced further.
+
 ## Timing (cycle model, [likely])
 
 **Changed.** The earlier sequence (latch ≈ 18 µs, clock idling low, 33 periods of 414
@@ -165,7 +227,10 @@ t (clocks)   P14  J13/K16
   Beware the cart-bus shifter direction pins.
 - Whether the board's latch/clock drivers invert (Q1–Q7 near J5/J6). The decoded waveform
   is already SNES-shaped (latch high pulse, clock idle high), so non-inverting is likely.
-- Which shift stages end up in which link status byte, and what the six-bit framing check is.
+- Whether the stock core really drops buttons 0–4 (the stage-29 clear above; hwtest v4's
+  virtual presses of B/Y/SELECT/START/UP would then be something the stock player never sees).
+- Which device "device A" is (ID 0100 in bits 12–15, data in `0x2001` bits 7–4, `0x2002`,
+  `0x2003`).
 - The real frequency of `CMUXHG.000.022.3` (clock switchover not decoded).
 - Whether J13 = port 1 clock and K16 = port 2 clock or the reverse (irrelevant while both get
   the same signal).

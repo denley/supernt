@@ -318,3 +318,101 @@ Entries 013–0A8 were on no page.
   explains the ~33 k "matches" per pass (columns 512–1023 right, chip A's constant byte equal to
   the expected low byte 1 time in 256). Chip A (low byte) never drives. Details in
   `notes/sdram.md`.
+
+# Third run, 22 Oct 2026: 12-q-hwtest v3, "Super Nt test chord.spc"
+
+- Core: hwtest v3 (commit bd4bf79, 4 mA on the stock-constant pins). Video `IMG_3062.mov`
+  (155 s, with sound; an earlier attempt `IMG_3061.mov` was aborted). Frames at 1 fps in
+  `~/scratch/hwtest-videos/IMG_3062/fNNN.jpg` (t ≈ NNN − 1 s); the full frames are readable as
+  they are, crops with `convert fNNN.jpg -crop 1500x880+250+40 -normalize -level 30%,95%`.
+  Runs of ≤ 4 bytes checked by recomputing CRC-32 from (length, data).
+- Pages: overview f008–f017, f056–f065, f104–f113, f152–; page 1 f018–f025, page 2 f026–f033,
+  page 3 f034–f041, page 4 f042–f049, page 5 f050–f055 (same order every 48 s).
+- Display bug found here: the first table row showed entry (start − 1) instead of being the
+  first of 19 (row index off by one; page 2's first row was a stale copy of big run 0). Fixed in
+  v4. The rows below are as shown.
+
+## Overview
+
+| field | f010 (t ≈ 9 s) | f112 (t ≈ 111 s) |
+|---|---|---|
+| LINK | answer 03, candidate 0 (emulated), steps 00, polling 1 from T 0x18F, fixed 0 | answer 02, candidate 1, steps 01, polling 1 from T 0x18F, **fixed 1 cand 1 at T 0x14AE** |
+| status reads / reads | 001E2614 / 001E2614 | 00229AA9 / 0022FA1? |
+| data writes / after poll | 00004ADB / 0 | 00008BC6 / 000040E? (the UI loop's one byte per ~32 ms keeps counting) |
+| runs / big / 1st read | 0BC / 04 / #0BB | 400 (log full) / 09 / #0BB |
+| address now | 20040002 | 20010003 |
+| VIDEO PLL | locked 1, waitrequest 1, pending 1, H16 01220A, out 024414, reconfig writes 01, last reg 00 = 00000000, C4 writes 0 | locked 1, waitrequest 1, pending 1, out 024413, reconfig writes 19, last reg 02 = 00000000, C4 writes 4, C4 now 00, out1 005460 |
+| PADS | raw FFFF0000, polls 011x | raw FFFF0000, polls 197D |
+| SDRAM | pass 0013, hypothesis 3 | pass 01C0, hypothesis 0 |
+| AUDIO | framing 1, 04 s, PLL 1 | framing 0, 60 s, PLL 1 |
+
+Pads during the first two overview pages (f008–f017, f056–f065): raw FFFF0001 with "held: B",
+FFFF0008 with "START", FFFF0100 with "A" in both (Denley pressed B, Start, A as asked): the
+names are right.
+
+## Page 1 (f021): up to two entries after the first status read
+
+| # | K | address | bytes | data (CRC-checked) | T |
+|---|---|---|---|---|---|
+| 0AA | 0 | 1000D114 | 2 | 08 00 | 0006E |
+| 0AB/0AC | 0 | 1000D110 / 1000D114 | 1 / 2 | 08 / 10 00 | 0008F |
+| 0AD/0AE | 0 | " | | 10 / 20 00 | 000CB |
+| 0AF/0B0 | 0 | " | | 20 / 40 00 | 000EB |
+| 0B1/0B2 | 0 | " | | 30 / 60 00 | 0010C |
+| 0B3/0B4 | 0 | " | | 40 / 80 00 | 0012C |
+| 0B5/0B6 | 0 | " | | 50 / A0 00 | 0014C |
+| 0B7/0B8 | 0 | " | | 60 / C0 00 | 0016D |
+| 0B9 | 0 | 10100033 | 1 | 00 | 0018D |
+| 0BA | 0 | 10000500 | 4 | 00 00 00 00 | 0018D |
+| 0BB | 1 | 20040000 | 2 | 03 03 (we returned; repeats 0x114D3A, last T 014A2) | 0018D |
+| 0BC | 1 | 20040000 | 2 | 02 02 (candidate 1) | 014A2 |
+
+Same set-up as v1/v2 up to the poll.
+
+## Page 2 (f029): write runs ≥ 32 bytes
+
+| # | address | bytes | D0 | CRC-32 | T |
+|---|---|---|---|---|---|
+| 000 | 00000000 | 1EAC | ED | 72770B4C | 00000 |
+| 003 | 10100000 | 0028 | 03 | 7B4EDA37 | 00003 |
+| 026 | 111F8100 | 0080 | 00 | FCB64B27 | 00004 |
+| 0A4 | 10170800 | 2500 | 00 | B1883CCD | 00008 |
+| 0F6 | 10060000 | 2000 | ED | B5CFAF0C | 014AC |
+| 0F9 | 10100000 | 0028 | 03 | 7B4EDA37 | 014B0 |
+| 11B | 10013000 | 0300 | 00 | D0C0DF2A | 014B1 |
+| 11D | 111F8100 | 0080 | 00 | FCB64B27 | 014B2 |
+| 13D | 10180000 | 1000 | 00 | CE6B18CC | 014F1 |
+
+The first four are the pre-poll set-up of every run (the block at 0 has had three lengths:
+0x1EAF, 0x1EB0, 0x1EAC). The five after the poll are new; none matches any window of the chord
+.spc.
+
+## Page 3 (f036): newest entries (the log was full at 0x400)
+
+| # | K | address | bytes | data | T |
+|---|---|---|---|---|---|
+| 3EC | 1 | 20010000 | 2 | 00 00 | 027B3 |
+| 3ED | 0 | 1000D120 | 1 | 01 | 027A4 |
+| 3EE / 3EF / 3F0 / 3F1 | 1 | 20000000 / 20010000 / 20000000 / 20010000 | 2 each | 00 00 | 027A4 |
+| 3F2 | 0 | 1000D120 | 1 | 01 | 027C4 |
+| 3F3–3F6 | 1 | 2000 / 2001 / 2000 / 2001 | 2 each | 00 00 | 027C4 |
+| 3F7 | 0 | 1000D120 | 1 | 01 | 027E4 |
+| 3F8–3FB | 1 | 2000 / 2001 / 2000 / 2001 | 2 each | 00 00 | 027E4 |
+| 3FC | 0 | 1000D120 | 1 | 01 | 02805 |
+| 3FD / 3FE | 1 | 20000000 / 20010000 | 2 each | 00 00 | 02805 |
+
+(Each run seen once; CRCs 41D912FF = 00 00, A505DF1B = 01.) The loop repeats every 0x20 = 32 ms;
+at 5 entries per loop the log filled ~10 s into the run, ~4.5 s after the loop started (shortly
+after the last big run at T 0x14F1 = 5.4 s).
+
+## Reading
+
+- `02 02` is the answer: the first post-poll block write came ~10 ms after the first 02 02.
+- The emulated reconfiguration IP never dropped waitrequest (pending write to register 0).
+- After the poll the PIC retunes the video PLL (25 register commits, 4 × `0x1000_00C4`), writes
+  five more blocks, then runs the UI loop and reads the pad registers `0x2000`/`0x2001`
+  (`notes/controllers.md`, "Link registers"). We answered 00 (nothing pressed); no file within
+  150 s. → hwtest v4 answers the pad and presses buttons by itself.
+- Audio: audible from ~4 s; `tools/audiocheck.py`: the I2S segments (440 Hz) clean, the
+  left-justified ones harsh. `AUD_FRAMING` = 0.
+- SDRAM: see `notes/sdram.md`, "hwtest v3 result".

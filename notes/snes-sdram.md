@@ -201,8 +201,7 @@ AB10 high (as this core is built); spc.cor drives AB10 low (`notes/sdram.md`, "C
 pins"). hwtest v2 tries AB10 low/high × open-drain pins released/low; set `AB10_LEVEL` (built
 with 1) and `DQM_LOW` (1 = hold the candidate pins low, built default; 0 = release them, the
 stock level) to the clean hypothesis and rebuild before running this core: as built it will most
-likely fail on the console. `PAD_CFG` 0 is confirmed; `AUD_FRAMING` is not (v1 was silent in
-both framings).
+likely fail on the console. `PAD_CFG` 0 is confirmed; `AUD_FRAMING` 0 (I2S) too (hwtest v3).
 
 **hwtest v2 (22 Oct 2026) changes three things here** (`notes/sdram.md`, "hwtest v2 result"):
 AB10 must be **low** (chip B drives only then; the open-drain group doesn't matter); the page

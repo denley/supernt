@@ -27,17 +27,24 @@ The sample rate is 3.0721 MHz / 64 = 48.001 kHz.
   per channel.
 - L18 is fed by a chain of registers that load parallel data (from logic on the 42.686 MHz
   `CMUXHG.054.022.1` clock) and shift on BCLK. Exactly where the MSB lands relative to the LRCLK
-  edge (I2S vs left-justified) and the word length aren't decoded; `quartus/hwtest` tests both
-  framings by ear instead.
+  edge (I2S vs left-justified) and the word length aren't decoded; `quartus/hwtest` tested both
+  framings on the console instead: **I2S** (see below).
 - The AD9889B itself is configured over I2C by the PIC32 (nothing in spc.cor looks like an I2C
   master), presumably for 48 kHz with N/CTS to match. Our cores only have to produce the stream.
 
 ## For our cores
 
+- **On hardware: I2S** [confirmed: hwtest v3, 22 Oct 2026, `IMG_3062.mov`]. The tone was
+  audible once the PIC got past its status poll (~4 s in; v1/v2, stuck at the poll, were
+  silent, so the PIC enables the AD9889B's audio only then); `tools/audiocheck.py` finds the
+  I2S segments (440 Hz) clean and the left-justified ones harsh. `AUD_FRAMING` = 0 in the SNES
+  cores is right.
 - `quartus/common/i2s_test.sv`: MCLK from a 12.288 MHz fractional PLL (DDIO copy on L17), BCLK
   = MCLK/4, LRCLK = BCLK/64, 24-bit samples MSB first in 32-bit slots, changes on BCLK falling
-  edges. It alternates I2S (440 Hz) and left-justified (880 Hz) every 4 s with a 0.9-full-scale
-  sine, so the wrong framing is audibly distorted (verified in simulation: `make sim-hwtest`).
+  edges. By default it alternates I2S (440 Hz) and left-justified (880 Hz) every 4 s with a
+  0.9-full-scale sine, so the wrong framing is audibly distorted (verified in simulation);
+  `FIXED_MODE` fixes the framing and `ATTEN` attenuates in 6 dB steps (hwtest v4: I2S only,
+  24 dB down; full scale was uncomfortably loud).
 - SNES: the DSP makes 32 kHz stereo 16-bit samples; for 48 kHz out, resample (or hold) in the
   core. Open: whether the PIC sets up the AD9889B's audio only while it believes the SPC player
   runs (it does in our test cores, since they replace spc.cor).

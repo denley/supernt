@@ -41,8 +41,8 @@ module top #(
     parameter LOCK       = 1,       // align output frames to the SNES (snes_video.sv)
     parameter [15:0] RESET_CYCLES = 16'hffff, // core reset after the boot copy (clk_sys cycles)
     // Serial audio framing the AD9889B expects (notes/audio.md): 0 = I2S, 1 = left-justified.
-    // Not settled: hwtest v1 (22 Oct 2026) was silent in both framings; the PIC probably sets
-    // up the HDMI audio only after the status handshake it never got (notes/hardware-tests.md).
+    // I2S confirmed on the console (hwtest v3, 22 Oct 2026); the PIC enables the HDMI audio
+    // only once its 0x2004 status poll has passed (notes/pic-link.md).
     parameter AUD_FRAMING = 0,
     // Controller port wiring (notes/controllers.md, numbering as quartus/common/pad_test.sv):
     // bit 1 = swap roles (latch on J13/K16, clock on P14), bit 0 = invert both outputs.

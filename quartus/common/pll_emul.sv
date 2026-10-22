@@ -28,7 +28,9 @@ module pll_emul (
     output reg  [23:0] out_per_ms = 24'd0, // outclk0 cycles per ms (148.5 MHz: 0x024414)
     output reg  [23:0] ref_per_ms = 24'd0, // H16 cycles per ms (74.25 MHz: 0x01220A)
     output reg  [23:0] out1_per_ms = 24'd0, // outclk1 cycles per ms (21.6 MHz: 0x005460)
-    output wire        busy_now         // a committed write is still waiting
+    output wire        busy_now,        // a committed write is still waiting
+    output reg         wait_low = 1'b0, // waitrequest has been 0 at some point (v3: stuck at 1?)
+    output reg  [7:0]  cmt_wlow = 8'd0  // commits accepted (waitrequest low while writing)
 );
     // ------------------------------------------------------------ PIC writes -> Avalon-MM
     reg  [7:0]  lane0 = 8'd0, lane1 = 8'd0, lane2 = 8'd0;
@@ -80,7 +82,11 @@ module pll_emul (
 
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [2:0] lk_s = 3'd0;
-    always @(posedge clk) lk_s <= {lk_s[1:0], locked};
+    always @(posedge clk) begin
+        lk_s <= {lk_s[1:0], locked};
+        if (!m_wait) wait_low <= 1'b1;
+        if (m_wr && !m_wait) cmt_wlow <= cmt_wlow + 8'd1;
+    end
     assign status = {lk_s[2], m_wait};
 
     // ------------------------------------------------------------ frequency counters

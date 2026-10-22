@@ -35,56 +35,81 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
-## Next session: hwtest v3 (prepared 22 Oct)
+## Next session: hwtest v4 (prepared 22 Oct)
 
 Starting the player: Tools → "Play SPC Files" (picking a file in the file browser didn't start
 it for Denley). That player takes the whole `SPC/` folder, so for one-file tests only that file
 stays in `SPC/` and the rest wait in `SPC-later/` on the card (22 Oct: chord only).
 
-**Before flashing, note what v3 drives that v2 didn't** (notes/sdram.md, "spc.cor pins with a
-constant level"): 43 pins that spc.cor drives to a constant and our cores so far left as
-weak-pull-up inputs, only ever at spc.cor's level: the 19 of banks 3A/3B (R5 R6 U7 U8 T7 T8 V6
-U6 V9 V10 U10 T10 P12 R12 N9 P9 low, M9 T9 U11 high) switched per SDRAM pass between that level
-and released, and 24 held at it for the whole run (4A: T13 T14 U16 V14 V15 V16 V19 W19 Y14 Y15
-Y16 Y17 Y19 low, R14 U15 U17 U20 V13 V18 V20 Y20 high; 7A: K19 K20 low, J17 high, next to the
-audio pins). H16 is used as an input (spc.cor's video-PLL reference).
+What v4 changes (v3 results below): it answers the status poll with **02 02 first** (what the
+PIC took in v3; the emulated PLL and the other candidates follow only if the PIC keeps
+polling), answers the **pad registers** `0x2000`/`0x2001` like the stock core (buttons, 1 =
+pressed; `notes/controllers.md`, "Link registers") and, since the PIC sat in the player's UI
+loop in v3 waiting for something, **presses buttons by itself**: once the UI loop has run 10 s
+without a file transfer, one button at a time for 0.5 s, 3 s apart, in the order A, START, X,
+Y, L, R, UP, DOWN, LEFT, RIGHT, SELECT, B (then round again), OR'd with the real pad, until a
+write run of ≥ 256 bytes (the file) starts. The screen records which press came before it.
+Pad reads aren't logged any more (counted), the log keeps its first 512 entries plus the newest
+512, page 2 shows the newest big runs. Audio: I2S only, 24 dB quieter. No pin changes from v3
+(same 138 I/Os, 4 mA on the 43 stock-constant pins).
 
-Build (22 Oct): see "hwtest v3 build" below. `make sim-hwtest` and `make sim-sdram` pass.
+Build (22 Oct): see "hwtest v4 build" below. `make sim-hwtest` passes (four link scenarios,
+the UI loop waits for START and gets it from the second virtual press).
 
-1. Put `out/q-hwtest.cor` (v3) on the card: mount it, `tools/sdcore setup`, `tools/sdcore use
+1. Put `out/q-hwtest.cor` (v4) on the card: mount it, `tools/sdcore setup`, `tools/sdcore use
    12`. Keep only the chord file in `SPC/`.
-2. Power-cycle, start "Play SPC Files", and film the screen for **2 minutes with sound** (the
-   pages now cycle in 50 s: overview 10 s, then five 8 s pages; two full cycles plus the
-   handshake stepping, up to 10 × 5 s). During the first overview page hold B, then Start,
-   then A on a pad in port 1 (v2's video had no button held while the overview showed).
+2. Power-cycle, start "Play SPC Files", film the screen with sound for **3 minutes, hands
+   off** (no button presses needed; a pad in port 1 may stay plugged in and still works).
+   Expected timeline (from the start of the core; the screen shows the real times): poll
+   answered at ~0.4 s, video-PLL retune and set-up blocks within ~0.1 s (v3: 80 ms after its
+   02), UI loop from ~0.5 s, virtual presses from ~10.5 s: A ~10.5 s, START ~14 s, X ~17.5 s,
+   Y ~21 s, L ~24.5 s, R ~28 s, UP ~31.5 s, DOWN ~35 s, LEFT ~38.5 s, RIGHT ~42 s, SELECT
+   ~45.5 s, B ~49 s, then again from A at ~52.5 s. Pages: overview 10 s, then five 8 s pages.
 3. What to read off:
-   - **LINK** (page 0, lines 2–6): "answer", "cand" with its name (candidate 0 = "emulated":
-     the real PLL + reconfiguration IP; then 02, 03, 01, 00, FF, toggle, busy1ms, lockdrop,
-     00-1ms, 5 s each while the PIC only polls), "polling" (1 once ≥ 1000 status reads) and
-     its T, "fixed 1 cand N at T" (the PIC wrote ≥ 4 KB after the first status read and the
-     last step: candidate N is the answer it wanted), "after poll" bytes. Expected: fixed with
-     candidate 0 (polling stays 0: the PIC shouldn't need 1000 reads), T ≈ 0x18D or a little
-     later, and the file as a big run on page 2 (CRCs in "Test files").
-   - **VIDEO PLL** (page 0): locked 1 and waitrequest 0 = the emulation answers 02; H16 kHz
-     ≈ 01220A (74.25 MHz; 000000 = no clock on H16, then candidate 0 says 01 and the fallback
-     goes on to 02), out kHz 024414 (148.5 MHz), out1 kHz 005460 (21.6 MHz); "reconfig writes",
-     "last reg = data" and "C4" show what the PIC does to the block (v2: one write, reg 00 =
-     00000000). If the PIC reprograms the PLL, the out kHz values change.
-   - Pages 1–3: page 1 now shows the 19 entries up to two after the first status read (the
-     set-up that precedes the poll), 2 the big runs (the file), 3 the newest entries.
-   - **SDRAM** pages 4 (errors per chip and capture point, 16 hypotheses) and 5 (raw words).
-     Chip B (columns "B") should be 000000 at r4 (and f3.5) in every row except 13 (AB10
-     high). Chip A: which rows show 000000 in the "A" columns. If chip A is clean in 0 and
-     12–15 and dirty in 1, the dirty rows among 2–6 give the index of the pin it needs (row
-     2+k dirty ⇔ bit k = 1; rows 7–11 the opposite); the index list is on the page. Raw page:
-     a driving chip changes its byte from r4 on (r4 = exp0, r5 = exp1 when right).
-   - **AUDIO**: whether the test tone becomes audible once the handshake passes; which pitch
-     is clean (440 Hz = I2S, 880 Hz = left-justified) → `AUD_FRAMING`.
-   - **PADS**: the held button's name next to "held:".
-4. If the file arrives, repeat 2–3 with `Super Nt big 1MB.spc` and the Gradius ROM file (one
-   file in `SPC/` at a time, power-cycle between).
+   - **PLAYER UI** (page 0): "pad reads" counting = the UI loop runs; "virtual press #NN =
+     button N" plus the name while pressed; "state" (1 waiting, 2 pressing, 3 done); the
+     "file:" line = press number and button (legend on the screen: 0 B … 8 A …) after which a
+     write run of ≥ 256 bytes started, its T and how long after the press start. Also note
+     anything that happens on screen/sound around each press (HDMI drop, the PIC's own
+     reactions in the log).
+   - **LINK**: "answer 02 candidate 1 steps 00", "fixed 1 cand 1" expected; page 2 = the
+     newest big write runs (the file: CRCs in "Test files"); page 3 = the newest entries (the UI
+     loop is one entry, `0x1000_D120` with a repeat count; anything new the PIC does after a
+     press shows here).
+   - **VIDEO PLL**: "waitrequest … (ever 0: N)": whether the emulated IP's waitrequest was ever
+     low (v3's stuck waitrequest), "taken" = commits it accepted.
+   - **SDRAM**, **AUDIO**: as v3 (nothing new expected; the tone should be quiet and clean).
+4. If the file arrives, repeat with `Super Nt big 1MB.spc` and the Gradius ROM file (one file
+   in `SPC/` at a time, power-cycle between).
 5. `13-q-snes_sdram` is still built for 1024 columns and AB10 high: don't run it (it needs the
-   512-column map, AB10 low and chip A's enable; notes/snes-sdram.md).
+   512-column map, AB10 low and a decision on chip A; notes/snes-sdram.md, notes/sdram.md).
+
+## hwtest v3 (12-q-hwtest, 22 Oct) results
+
+Chord file only, video `IMG_3062.mov` (155 s, with sound; `IMG_3061.mov` an aborted first
+try); frames `~/scratch/hwtest-videos/IMG_3062/`; transcription in
+`notes/buslog-2026-10-22-hwtest.md`, third part.
+
+- **LINK: 02 02 is the answer.** Candidate 0 (the emulated PLL + Altera reconfiguration IP)
+  answered 03 03: its waitrequest never dropped after the PIC's write to register 0 (it does in
+  simulation; open). After 5 s the fallback stepped to candidate 1 = 02 and the PIC moved on
+  at once (fixed with candidate 1 at T 0x14AE). It then retuned the video PLL (25 commits to
+  the `0x1000_05xx` block, 4 writes to `0x1000_00C4`; a short HDMI drop), wrote five more blocks
+  (`0x1006_0000` 0x2000, `0x1010_0000` 0x28, `0x1001_3000` 0x300, `0x111F_8100` 0x80,
+  `0x1018_0000` 0x1000; none is part of the .spc) and from ~5.5 s on ran a ~32 ms loop: write
+  01 to `0x1000_D120`, read `0x2000_0000` and `0x2001_0000` (2 bytes each), twice. Those are the
+  pad registers (decoded since, `notes/controllers.md`); v3 answered 00. **The file never
+  came**: the player UI presumably waits for a button. The 1024-entry log was full after ~10 s.
+- **AUDIO works** from ~4 s (once the poll passed): `tools/audiocheck.py` finds the I2S
+  segments (440 Hz) clean, the left-justified ones harsh. **`AUD_FRAMING` = 0 (I2S)
+  confirmed.** The full-scale tone was uncomfortably loud.
+- **PADS**: raw FFFF0000 idle, FFFF0001 / FFFF0008 / FFFF0100 with B / START / A, named right.
+- **SDRAM**: chip B 000000 errors at f3.5 and r4 in every hypothesis except 13 (AB10 high);
+  chip A ~7F8000 (every word) in all 16: its enable is none of the 19 3A/3B constants nor the
+  held 4A/7A ones (`notes/sdram.md`, "hwtest v3 result"). Next: a continuity check on chip A's
+  CKE/DQM/CS#; fallbacks chip B alone (8-bit) or the x16 chip.
+- Display bug: the table pages showed entry (start − 1) in their first row (page 2's first row
+  a stale copy of big run 0); fixed in v4.
 
 ## hwtest v2 (12-q-hwtest, 22 Oct) results
 
@@ -108,6 +133,21 @@ transcription in `notes/buslog-2026-10-22-hwtest.md`, second part).
   PIC sets up the AD9889B's audio only after the file transfer.
 - **PADS: not exercised** (no button held while the overview was on screen; raw FFFF0000
   throughout). cfg 0 stays confirmed from v1.
+
+## hwtest v4 build (22 Oct)
+
+- `out/q-hwtest.cor` sha1 eecebe77…, timing met (all slacks positive), pin check passes (138
+  I/Os, the same pins and settings as v3, 4 mA on the 43 stock-constant pins). Map report: the
+  only new constant registers are the expected ones (the fixed pad bytes, the fixed audio
+  framing, constant fields of the log entries).
+- `make sim-hwtest`: four link scenarios (default: 02 at once; `+cand0`: the emulated PLL
+  answers 02; `+cand0 +noh16`: emulation 01, one step to 02; `+want=00`: three steps). In each,
+  the PIC stand-in writes a 600-byte set-up block after the poll, then runs the UI loop with the
+  pad holding Y and R (0x2000 = 02, 0x2001 = 08), sees A (0x2001 = 09) from the first virtual
+  press and START (0x2000 = 0A) from the second, then sends the 1 KB file: recorded as "after
+  press 2 = button 3". The UI loop is one log entry (`0x1000_D120`, repeats = loops), the 232
+  pad reads are only counted, 1100 more entries wrap the log (the first 512 and the newest 512
+  readable, the newest entry right). I2S only at 0.056 full scale, clean (`check.py`).
 
 ## hwtest v3 build (22 Oct)
 
@@ -143,7 +183,7 @@ chord file was run (results below); the link part showed why nothing else could 
 | 07/08 | buslog / q-buslog | hex log of the PIC32 link; film ~3 min |
 | 09 | q-snes | green bar + 7 green test lines, white and cyan moving squares |
 | 10/11 | plltest / blinky | only if 05/06 show nothing |
-| 12 | q-hwtest | v3: link status from a real PLL + reconfiguration IP with fallback, SDRAM chip A enable search, pads by name, audio (see Next session) |
+| 12 | q-hwtest | v4: status 02, pad registers with automatic virtual presses, ring log; SDRAM, pads, audio as v3 (see Next session) |
 | 13 | q-snes_sdram | as 09, but the ROM runs from SDRAM |
 | 00 | stock JB7.2 | restore |
 
