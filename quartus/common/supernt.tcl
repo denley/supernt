@@ -12,3 +12,8 @@ set_global_assignment -name ENABLE_OCT_DONE OFF
 # I/O banks: spc.cor configures every pin it uses as 2.5 V with 50 ohm series termination.
 set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "2.5 V"
 set_global_assignment -name NUM_PARALLEL_PROCESSORS 4
+# Registers power up at their Verilog initial values. With Quartus' default (power-up don't
+# care) synthesis may pick any power-up value for a register whose initial value it can
+# "simplify" away: hwtest v2 lost first_rd = 11'h7ff (stuck at 0) and cand_locked = 0 (stuck at
+# 1, so the answer never stepped); both are listed as "Stuck at" in the map report.
+set_global_assignment -name ALLOW_POWER_UP_DONT_CARE OFF

@@ -230,3 +230,91 @@ All 20 rows shown (entries 000–013) are identical:
   keeps polling.
 - The file (`build/test-chord.spc`, CRC 68D8FB8F) never came: none of the four big-run CRCs
   matches it or any part of it.
+
+# Second run, 22 Oct 2026: 12-q-hwtest v2, "Super Nt test chord.spc"
+
+- Core: hwtest v2 (commit 88d2382, `out/q-hwtest.cor` sha1 9c3a6424…). Video `IMG_3059.mov`
+  (84 s), frames at 1 fps in `~/scratch/hwtest-videos/3059/fNNN.jpg` (t = NNN − 1 s). Crops
+  read with `convert fNNN.jpg -crop 1600x900+150+60 -normalize -level 30%,95%` (left edge
+  `+0+40` for the `#` column). Every value below was read from the frames named; runs of up to
+  4 bytes were checked by solving their data from (length, D0, CRC-32).
+- Pages: 0 overview f006–f015, f040–f049, f074–f083; 1 f016–f023 (and later cycles); 2
+  f024–f031; 3 f032–f039.
+
+## Overview (f080, t ≈ 79 s)
+
+| field | value |
+|---|---|
+| LINK | 0x2004 answer 03, candidate 0, steps 00, fixed 1 |
+| data writes / after 1st read | 00004ADF / 00004ADF |
+| reads | 020E0059 |
+| runs / big / 1st read # | 0BC / 004 / #000 |
+| address now | 20040001 |
+| PADS | raw FFFF0000 in every overview frame (f006–f015, f040–f048, f074–f082): no button was held while the overview showed |
+| SDRAM | pass 00A4, hypothesis now 1 (table below) |
+| AUDIO | framing toggling, PLL 1; silent (`tools/audiocheck.py`) |
+
+SDRAM, errors in each hypothesis's last pass (of 0x1000000 words):
+
+| hyp | AB10 | OD pins | r3 | f2.5 | r4 | f3.5 | r5 | f4.5 | r6 | f5.5 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | low | released | FFFFDC | FFFFDC | FF7F05 | FF7F05 | FFFF04 | FFFF04 | FFFF04 | FFFF04 |
+| 1 | low | low | FFFF54 | FFFF54 | FF81FF | FF8200 | FFFE9A | FFFE9A | FFFA9A | FFFA9A |
+| 2 | high | released | FFFEFE × 8 | | | | | | | |
+| 3 | high | low | FFFF02 × 8 | | | | | | | |
+
+Raw words, bank 0 row 0, rising edges 2–7 after READ | expected col 0, col 1 | idle | passes:
+
+| hyp | r2 | r3 | r4 | r5 | r6 | r7 | exp | idle | passes |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | BC5E | BC5E | C55E | DD5E | F65E | E85E | C84A C1C0 | FA7F | 0029 |
+| 1 | 3F02 | 3F02 | 7202 | 6C02 | 9B02 | 2302 | 660E 7F88 | 657F | 0029 |
+| 2 | 39CF × 6 | | | | | | 0437 8EB1 | FF7F | 0029 |
+| 3 | 16F7 × 6 | | | | | | 3A83 A379 | FF7F | 0029 |
+
+## Link pages
+
+Page 2 (big write runs, f028): the same four as v1 except the first: `00000000` 0x1EB0 bytes,
+D0 ED, CRC 92E2E12B (v1: 0x1EAF, 3F05C007); `10100000` 0x28 03 7B4EDA37; `111F8100` 0x80 00
+FCB64B27; `10170800` 0x2500 00 B1883CCD (T 0, 3, 4, 8).
+
+Page 1 (f020/f021) showed entries 000–012, because "1st read" was stuck at #000: entries
+000–012 are the same set-up writes as v1's 000–012 (`10000034`, `10100034`, `10100000`,
+`1000806B` …), same lengths, D0 and CRCs.
+
+Page 3 (newest entries, f036), all T in 1.024 ms units; data solved from the CRCs (the CRCs in
+brackets are the corrected readings):
+
+| # | K | address | bytes | data | T |
+|---|---|---|---|---|---|
+| 0A9/0AA | 0 | 1000D110 / 1000D114 | 1 / 2 | 04 / 08 00 | 0006E |
+| 0AB/0AC | 0 | " | | 08 / 10 00 (0B1B00AE) | 0008F |
+| 0AD/0AE | 0 | " | | 10 / 20 00 | 000CB |
+| 0AF/0B0 | 0 | " | | 20 / 40 00 | 000EB |
+| 0B1/0B2 | 0 | " | | 30 (F4DBDF21) / 60 00 (24247958) | 0010C |
+| 0B3/0B4 | 0 | " | | 40 / 80 00 | 0012C |
+| 0B5/0B6 | 0 | " | | 50 (B969BE79) / A0 00 | 0014C |
+| 0B7/0B8 | 0 | " | | 60 / C0 00 (8A23C5B1) | 0016D |
+| 0B9 | 0 | 10100033 | 1 | 00 | 0018D |
+| 0BA | 0 | **10000500** | 4 | 00 00 00 00 (2144DF1C) | 0018D |
+| 0BB | 1 | 20040000 | 2 | 03 03 (we returned), repeats 0x6E…… | 0018D |
+
+Entries 013–0A8 were on no page.
+
+## Reading
+
+- The PIC's last act before the poll is a 32-bit write of 0 to `0x1000_0500`, register 0 of the
+  video-PLL reconfiguration block = the MODE register of Altera's `altera_pll_reconfig`
+  (0 = waitrequest mode). The poll starts at T = 0x18D (406 ms), as in v1. Before that,
+  `0x1000_D110` (1 byte) and `0x1000_D114` (16 bits) step together through 8 values over
+  ~260 ms.
+- "fixed 1", "steps 00" and "1st read #000" were a build problem, not the PIC: Quartus'
+  default *power-up don't care* turned `cand_locked` into a constant 1 and `first_rd` (power-up
+  value 7FF) into a constant 0 (`hwtest.map.rpt`, "Stuck at VCC/GND"). So v2 answered 03 03 for
+  the whole run and never tried another value. Fixed globally (`quartus/common/supernt.tcl`).
+- SDRAM: chip B's raw words are exactly the pattern written to columns 512–515 of the same row
+  (both hypotheses 0 and 1): the page has 512 columns, and v2's 1024-word burst wrapped and
+  overwrote columns 0–511. With that, chip B is right at r4 and f3.5 in every word, which also
+  explains the ~33 k "matches" per pass (columns 512–1023 right, chip A's constant byte equal to
+  the expected low byte 1 time in 256). Chip A (low byte) never drives. Details in
+  `notes/sdram.md`.

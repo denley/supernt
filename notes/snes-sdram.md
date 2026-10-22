@@ -204,6 +204,14 @@ stock level) to the clean hypothesis and rebuild before running this core: as bu
 likely fail on the console. `PAD_CFG` 0 is confirmed; `AUD_FRAMING` is not (v1 was silent in
 both framings).
 
+**hwtest v2 (22 Oct 2026) changes three things here** (`notes/sdram.md`, "hwtest v2 result"):
+AB10 must be **low** (chip B drives only then; the open-drain group doesn't matter); the page
+has **512 columns**, so `sdram_rom.sv`'s word → {bank, row, column[9:0]} map aliases columns c
+and c + 512 and must become column[8:0] with one more bit taken into the bank/row; and **chip A
+(low byte) does not answer yet**, so until hwtest v3 finds its enable pin only the high byte
+works. Capture: chip B was clean at rise 4 and fall 3.5 (errN 2 and 3 of the table above,
+"keep h = 7").
+
 ## Boot copy
 
 clk_mem side of `snes_sdram_top.sv`: after the controller's init, SDRAM word i ← boot ROM word

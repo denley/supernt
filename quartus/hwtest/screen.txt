@@ -1,28 +1,25 @@
-
-   [y]SUPER NT HARDWARE TEST v2[w]  page {13.1}  frame {0.8}  time {11.8} us
-   [y]LINK[w]  0x2004 answer {18.2@2:y}  candidate {18.1:y}  steps {18.2@4}  fixed {18.1@1}
-      data writes {4.8}  after 1st read {19.8}  reads {5.8}
-      runs {7.3}  big {8.3}  1st read #{9.3}  address {10.8}  last strobe {12.8}
-
+   [y]SUPER NT HARDWARE TEST v3[w]  page {20.1@7}  frame {0.8}  time {1.8} us
+   [y]LINK[w] 0x2004 answer {2.2@5:y} cand {2.1@7:y} [y]{?16:emulated}{?17:02}{?18:03}{?19:01}{?20:00}{?21:FF}{?22:toggle}{?23:busy1ms}{?24:lockdrop}{?25:00-1ms}[w]
+      steps {2.2@3}  polling {2.1}  from T {10.5}  fixed {2.1@2:y} cand {2.1@1:y} at T {11.5}
+      status reads {5.8}  data writes {3.8}  after poll {6.8:y}
+      reads {4.8}  runs {7.3@5}  big {7.2}  1st read #{7.3@2}  address {8.8}
+      last strobe {9.8}  armed at {21.8}
+   [y]VIDEO PLL[w] locked {12.1@7:y}  waitrequest {12.1@6:y}  pending {12.1@5}  H16 kHz {15.6}
+      out kHz {14.6} (024414)  reconfig writes {12.2}  last reg {14.2@6} = {13.8}
+      C4 writes {12.1@2}  C4 now {12.2@3}  out1 kHz {22.6} (005460)
    [y]PADS[w]  port 1 raw {16.8:y}  polls {17.4}   (FFFF0000 = nothing held)
       held: [y]{?0:B} {?1:Y} {?2:SELECT} {?3:START} {?4:UP} {?5:DOWN} {?6:LEFT} {?7:RIGHT} {?8:A} {?9:X} {?10:L} {?11:R}
 
-   [y]SDRAM[w]  pass {20.4}  hypothesis now {21.1:y}  errors in its last pass (of 1000000):
-   hyp AB10 OD-pins  r3     f2.5   r4     f3.5   r5     f4.5   r6     f5.5
-   0   low  released {24.6} {25.6} {26.6} {27.6} {28.6:y} {29.6:y} {30.6} {31.6}
-   1   low  low      {24.6} {25.6} {26.6} {27.6} {28.6:y} {29.6:y} {30.6} {31.6}
-   2   high released {24.6} {25.6} {26.6} {27.6} {28.6:y} {29.6:y} {30.6} {31.6}
-   3   high low      {24.6} {25.6} {26.6} {27.6} {28.6:y} {29.6:y} {30.6} {31.6}
-   raw: bank 0 row 0, rising edges 2-7 after READ | expected | idle bus | passes
-   0  {24.4} {24.4@4} {25.4} {25.4@4} {26.4} {26.4@4}  exp {27.4} {27.4@4}  idle {28.4}  {28.4@4}
-   1  {24.4} {24.4@4} {25.4} {25.4@4} {26.4} {26.4@4}  exp {27.4} {27.4@4}  idle {28.4}  {28.4@4}
-   2  {24.4} {24.4@4} {25.4} {25.4@4} {26.4} {26.4@4}  exp {27.4} {27.4@4}  idle {28.4}  {28.4@4}
-   3  {24.4} {24.4@4} {25.4} {25.4@4} {26.4} {26.4@4}  exp {27.4} {27.4@4}  idle {28.4}  {28.4@4}
-   [y]AUDIO[w]  framing {1.1} (0 = I2S 440 Hz, 1 = left-justified 880 Hz)  {2.2} s  PLL {3.1}
-   Pages: 0 this (10 s), 1 link from 1st read, 2 big writes, 3 newest runs (8 s)
-%%page
+   [y]SDRAM[w]  pass {18.4@4}  hypothesis now {18.1:y}   tables on pages 4 and 5
+   [y]AUDIO[w]  framing {19.1@6} (0 = I2S 440 Hz, 1 = left-justified 880 Hz)  {19.2} s  PLL {19.1@7}
 
-   [y]LINK: FROM 2 BEFORE THE FIRST STATUS READ[w]  page {13.1}  from #{14.3} of {15.3}
+   Candidates: 0 emulated PLL, 1 02, 2 03, 3 01, 4 00, 5 FF, 6 bit 0 toggling,
+   7 03 1 ms then 02, 8 01 1 ms + 03 1 ms then 02, 9 00 1 ms then 02 (5 s each)
+
+   Pages: 0 this (10 s), 1 link up to the first status read, 2 big writes,
+   3 newest runs, 4 SDRAM errors, 5 SDRAM raw words (8 s each)
+%%page
+   [y]LINK: UP TO 2 AFTER THE FIRST STATUS READ[w]  page {20.1@7}  from #{20.3@4} of {20.3}
    #    K  ADDRESS   BYTES   D0  CRC-32    T      REPEATS   LAST T
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
@@ -44,8 +41,7 @@
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
 %%page
-
-   [y]LINK: WRITE RUNS OF 32+ BYTES[w]  page {13.1}  from #{14.3} of {15.3}
+   [y]LINK: WRITE RUNS OF 32+ BYTES[w]  page {20.1@7}  from #{20.3@4} of {20.3}
    #    K  ADDRESS   BYTES   D0  CRC-32    T      REPEATS   LAST T
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
@@ -67,8 +63,7 @@
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
 %%page
-
-   [y]LINK: NEWEST ENTRIES[w]  page {13.1}  from #{14.3} of {15.3}
+   [y]LINK: NEWEST ENTRIES[w]  page {20.1@7}  from #{20.3@4} of {20.3}
    #    K  ADDRESS   BYTES   D0  CRC-32    T      REPEATS   LAST T
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
@@ -89,3 +84,48 @@
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
    {30.3}  {27.1@7:y}  {24.8}  {25.6}  {27.2@5}  {26.8:g}  {27.5}  {28.8:y}  {29.5}
+%%page
+  [y]SDRAM ERRORS PER CHIP[w] (A = 2A low byte, B = 3B high byte) of 800000 words
+  in each hypothesis's last pass; pass {18.4@4}, hypothesis now {18.1:y}
+  hyp pins             A f3.5 A r4   A f4.5 A r5   B f3.5 B r4   B f4.5 B r5
+  0   stock            {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  1   all released     {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  2   rel idx bit0=1   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  3   rel idx bit1=1   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  4   rel idx bit2=1   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  5   rel idx bit3=1   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  6   rel idx bit4=1   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  7   rel idx bit0=0   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  8   rel idx bit1=0   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  9   rel idx bit2=0   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  10  rel idx bit3=0   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  11  rel idx bit4=0   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  12  stock + Y3 low   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  13  stock + AB10 hi {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  14  stock + OD low   {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  15  stock            {24.6} {25.6:y} {26.6} {27.6} {28.6} {29.6:y} {30.6} {31.6}
+  idx 0-7 R5 R6 U7 U8 T7 T8 V6 U6, 8-15 V9 V10 U10 T10 P12 R12 N9 P9 (stock 0),
+  16-18 M9 T9 U11 (stock 1); rel = released (pull-up); OD = open-drain group
+  4A and K19 K20 J17 always at stock level; AB10 low except in 13.
+%%page
+  [y]SDRAM RAW WORDS[w] bank 0 row 0, rising edges 2-7 after READ (chip B = high byte)
+  pass {18.4@4}, hypothesis now {18.1:y}
+  hyp pins             r2   r3   r4   r5   r6   r7    exp0 exp1  idle  passes
+  0   stock            {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  1   all released     {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  2   rel idx bit0=1   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  3   rel idx bit1=1   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  4   rel idx bit2=1   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  5   rel idx bit3=1   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  6   rel idx bit4=1   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  7   rel idx bit0=0   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  8   rel idx bit1=0   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  9   rel idx bit2=0   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  10  rel idx bit3=0   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  11  rel idx bit4=0   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  12  stock + Y3 low   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  13  stock + AB10 hi {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  14  stock + OD low   {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  15  stock            {24.4} {24.4@4} {25.4:y} {25.4@4:y} {26.4} {26.4@4}  {27.4} {27.4@4}  {28.4}  {28.4@4}
+  v2 (512-column page found): chip B right at r4 = exp0, r5 = exp1.
+  A chip that drives shows changing bytes from r4 on; a dead one a constant.

@@ -20,8 +20,14 @@ independent checks; **[guess]** = plausible, not checked.
   then PRECHARGE ALL. tRP = tRCD = 3 cycles (25.9 ns). Refresh: one AUTO REFRESH every **2400
   cycles = 20.7 µs** (slower than the 15.6 µs that 4096 rows / 64 ms needs).
 - CKE and DQM are not driven by the controller logic (tied on the board or by a constant pin) [likely].
-  AB10, a constant output next to the clock, is **low** in spc.cor [likely]; hwtest v1 drove it
-  high and the chips never answered ("Constant pins" below).
+  AB10, a constant output next to the clock, is **low** in spc.cor [likely]; **chip B drives
+  only while AB10 is low** [confirmed: hwtest v1/v2], so AB10 is chip B's DQM (or another
+  active-low enable) [likely].
+- **The page has 512 columns** [confirmed: hwtest v2, "hwtest v2 result" below]: a full-page
+  burst wraps after 512 words, which is why the stock controller only uses 512-word bursts.
+  Chip B returns correct data with our 74.25 MHz controller at capture point r4 / f3.5.
+  **Chip A (2A) has never driven the bus** in any run; its enable is probably one of the
+  constant pins spc.cor drives and our cores leave as pull-up inputs (hwtest v3 finds which).
 - A second, independent controller at 148.5 MHz drives top-bank and 3A pins (probably the x16
   AS4C8M16SA), partly decoded below.
 
@@ -59,7 +65,11 @@ Notes on the table:
 
 - **The 128 Mbit x8 part has 12 row bits (A0–A11), not 13**: 4 banks × 4096 rows × 1024 columns
   × 8 (4K refresh) [datasheet, from memory; check]. So the 18 fabric outputs are exactly A0–A11 +
-  BA0/BA1 + CS#/RAS#/CAS#/WE#, and nothing drives CKE or DQM.
+  BA0/BA1 + CS#/RAS#/CAS#/WE#, and nothing drives CKE or DQM. **But chip B wraps its burst at
+  512 columns** (hwtest v2), so the chips are not organised like that (a 64 Mbit x8, 4 × 4096 ×
+  512, fits; whether there is a 13th row bit on some other pin is open). All 12 row pins and both
+  bank pins select distinct storage (v2: bank 0 row 0 kept its own data while 16 383 other
+  rows were written after it).
 - A0–A9 order: both clients' row addresses are counters/adders, and their carry-chain bit order maps
   to the pins in the same order (AB13 AA13 AB12 AA12 U2 U1 W2 AA2 AA1 N1). Taking that as A0..A9,
   the MRS value (pins AB13 AA13 AB12 U2 U1 high) reads **0x037**: full page (A2..A0 = 111, which the
@@ -229,6 +239,63 @@ open-drain low, 2 = AB10 high + released, 3 = AB10 high + low (v1's two), with p
 error counts at the eight capture points and the raw bus words after the first READ. All four
 only use levels spc.cor or v1 already put on these pins.
 
+## hwtest v2 result (22 Oct 2026): 512-column page, chip B works, chip A silent
+
+Console run of hwtest v2 (`notes/buslog-2026-10-22-hwtest.md`, second run). Four pin
+hypotheses (AB10 low/high × open-drain group released/low), 1024-word bursts, 16-bit compare.
+
+- AB10 high: nothing drives (raw words constant, FFFEFE/FFFF02 errors of 0x1000000).
+- AB10 low (open-drain group released or low alike): the **high byte (chip B, bank 3B)** changes
+  every cycle from rising edge 4 after the READ, the **low byte (chip A, 2A)** stays constant
+  (5E, 02; idle 7F). At r4 and f3.5 ~33 000 words per pass matched, at the other points ~250.
+- The raw high bytes at edges 4–7 (C5 DD F6 E8 in hypothesis 0, 72 6C 9B 23 in 1) are exactly
+  the high bytes of the pattern written to **columns 512–515 of the same row** in that pass
+  (`~/scratch/v3/alias.py`, throwaway: exhaustive search over bank, row and column). The
+  1024-word write burst wrapped after 512 columns and overwrote columns 0–511 with the data of
+  512–1023; reads wrap the same way, so columns 512–1023 read back right. Count check: half of
+  the 2^24 words have the right high byte; chip A's floating byte equals the expected low byte
+  1 time in 256 → 32 768 expected, 33 019 and 32 257 seen. So chip B, the command/address
+  pins, the MRS pattern (CL3, full page), our inverted 74.25 MHz clock and the r4 capture point
+  all work; only the page is 512 columns, not 1024. [confirmed]
+- Chip A never drives, with the open-drain group (incl. Y3, the only spare pin in its bank 2A)
+  released or low. Every logic-driven stock pin in banks 2A/3A/3B is accounted for (SDRAM
+  pins, the 148.5 MHz controller's pins, M8 = cart-ADC LRCK, `notes/controllers.md`), so if chip
+  A has an FPGA-side enable it is one of the **constant** pins below, which spc.cor drives and
+  our cores leave as weak-pull-up inputs (Quartus `RESERVE_ALL_UNUSED_PINS_WEAK_PULLUP`).
+
+### spc.cor pins with a constant level (all banks, `~/scratch/v3/pinclass.py`, throwaway)
+
+spc.cor configures all 224 user I/Os. Besides the logic-driven pins, the open-drain group and
+the inputs, these are outputs with OE always on and DATAOUT unrouted, i.e. constants:
+**inverter set = 0**, **no inverter = 1** (same convention that made AB10 = 0, which v2
+confirmed). Pins in the top banks (y = 045) can also be driven through HMC bypass routes; the
+ones listed there have no route in `build/spc-pinmap.txt`.
+
+| bank (Quartus `.pin` report for the pins hwtest v3 uses) | level 0 | level 1 |
+|---|---|---|
+| 3A (GPIO.010/012.000) | R5 R6 U7 U8 T7 T8 V6 U6 | – |
+| 3B (GPIO.016–029.000) | AB10, V9 V10 U10 T10 P12 R12 N9 P9 | M9 T9 U11 |
+| 4A (GPIO.033–052.000) | T13 T14 U16 V14 V15 V16 V19 W19 Y14 Y15 Y16 Y17 Y19 | R14 U15 U17 U20 V13 V18 V20 Y20 |
+| top (y = 045; K19 K20 J17 are 7A per Quartus) | A14 B5 G16 H13 K19 K20 | B13 B16 J17 (others in the raw list are HMC-driven) |
+
+Tri-stated in spc.cor (OE off) on the bottom edge: M7 U12 U13 (and W16, the clock input).
+
+### hwtest v3 (prepared 22 Oct)
+
+- 512-word bursts (4 banks × 4096 rows × 512 columns = 16 MB tested per pass, ~0.25 s).
+- Errors counted **per chip** (A = low byte, B = high byte) at f3.5, r4, f4.5, r5.
+- The 19 constant pins of 3A/3B are index 0–18 (R5 R6 U7 U8 T7 T8 V6 U6 V9 V10 U10 T10 P12 R12
+  N9 P9 at 0, M9 T9 U11 at 1) and are switched per pass between spc.cor's level and released
+  (weak pull-up, as in v1/v2). 16 hypotheses (`sdram_test.sv`): 0 stock, 1 all released, 2–6
+  stock except the pins whose index has bit k set released, 7–11 the same with bit k clear,
+  12 stock + Y3 low, 13 stock + AB10 high, 14 stock + whole open-drain group low, 15 stock. If
+  chip A needs one of them at its stock level, it is clean in 0 and 12–15, fails in 1, and
+  hypotheses 2–6 spell the pin's index in binary (fail in 2+k ⇔ bit k = 1; 7–11 the complement).
+  `make sim-sdram` checks exactly this with chip A's DQM on index 5 in the model.
+- The 4A constants and K19 K20 J17 are held at spc.cor's level for the whole run (not
+  switched: 4A is the PIC link's bank; K19/K20/J17 sit next to the audio pins).
+- Only spc.cor's levels are ever driven on these pins; "released" is what v1/v2 already did.
+
 ## Method
 
 - Seeds: the 18 outputs + DQ OE/CE. `tools/netlist.py` cone back to C1 FFs in the region; other
@@ -254,9 +321,10 @@ only use levels spc.cor or v1 already put on these pins.
 
 ## Open questions
 
-- What drives CKE and DQM: AB10 is a constant 0 in spc.cor [likely] (so not CKE; DQM?), the
-  open-drain pins are released [likely]; hwtest v2's hypotheses test it. A continuity check on
-  U5/U16 (TSOP-54 x8: CKE pin 37, DQM pin 39; check the datasheet) answers it directly.
+- Chip A's enable (DQM/CKE/CS): hwtest v3's hypotheses over the 3A/3B constant pins. AB10 = chip
+  B's DQM [likely]. A continuity check on the chips (TSOP-54 x8: CKE pin 37, DQM pin 39; check
+  the datasheet) answers it directly.
+- The part: 512-column page (v2), so not 4096 × 1024; a 13th row bit?
 - BA0 vs BA1 on AA15/AB15; A11 = N2 is by elimination. Neither matters functionally.
 - A0–A6 identity (needed only for a different MRS than Analogue's): verify on hardware.
 - DDIO high/low data index (AB11/H8 polarity).
@@ -265,9 +333,10 @@ only use levels spc.cor or v1 already put on these pins.
 
 ## Recommendation for our controller (SNES ROM ≤ 6 MB)
 
-- **Use the x8 pair** as one x16 bus: pins above, shared CLK AB11. One bank holds 4096 rows × 1024
-  columns × 2 B = 8 MB, so a 6 MB ROM fits in bank 0 (word address = {row[11:0], col[9:0]}, or
-  interleave banks for faster random access).
+- **Use the x8 pair** as one x16 bus: pins above, shared CLK AB11. **Columns are 9 bits (512 per
+  page, hwtest v2)**: one bank holds 4096 rows × 512 columns × 2 B = 4 MB, so a 6 MB ROM needs
+  two banks (word address = {bank[0], row[11:0], col[8:0]}). Until chip A works, only the high
+  byte (chip B) is usable: 8 MB as an x8 memory.
 - **Clock 85.909 MHz** (4 × SNES master clock; `pllpatch.py solve 85.90908` → frac8, C=7). Use
   **CL2** if the -6 datasheet allows CL2 at 11.6 ns (check tCK(CL2)), else CL3; the stock core runs
   the same chips at 115.9 MHz/CL3. A random 16-bit read (PRE-less, banks closed: ACT, tRCD 2, READ,

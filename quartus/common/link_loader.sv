@@ -73,10 +73,11 @@ module link_loader #(
 
     reg [31:0] lat = 32'd0;
     // Status reads as the stock core answers them when idle (notes/pic-link.md, "Status
-    // 0x2004_0000"): 0x2xx4_xxxx = 0x03 (PLL reconfig idle, PLL locked), the rest 0x00. The
-    // PIC polls 0x2004_0000 before it sends a file and waits there on any other value.
+    // 0x2004_0000"): 0x2xx4_xxxx = 0x02 (video PLL locked, reconfiguration controller's
+    // waitrequest low), the rest 0x00. The PIC polls 0x2004_0000 before it sends a file; it
+    // waited on 03 03 (hwtest v2). Not yet confirmed on the console (hwtest v3).
     function [7:0] rdval(input [31:0] ad);
-        rdval = ad[31:28] == 4'h2 && ad[19:16] == 4'h4 ? 8'h03 : 8'h00;
+        rdval = ad[31:28] == 4'h2 && ad[19:16] == 4'h4 ? 8'h02 : 8'h00;
     endfunction
 
     reg        dbyte = 1'b0;            // a data byte for the window this cycle

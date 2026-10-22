@@ -19,11 +19,13 @@ read and write strobes, 3 address lines), sampled by the FPGA at 42.686 MHz:
   "latch address and increment" (read prefetch).
 - Writes to register 2 are posted to the core's memory/register space at the 32-bit address;
   reads return a byte selected by the last latched address (SDRAM, internal registers, or 0).
-- **The PIC polls `0x2004_0000` (2 bytes) before it sends a file** (22 Oct console run, section
-  "Status 0x2004_0000"). It is the status of a reconfiguration block for the video PLL
-  (FPLL.000.037): bit 1 = PLL locked, bit 0 = a ready/idle flag; the same byte at every
-  `0x2xx4_xxxx` address. The stock idle answer decodes as 0x03 or 0x02 (one clear polarity
-  is ambiguous). hwtest v1 answered `02 00` and the PIC polled for the whole minute.
+- **The PIC polls `0x2004_0000` (2 bytes) before it sends a file** (22 Oct console runs, section
+  "Status 0x2004_0000"), right after writing 0 to `0x1000_0500`. It is the status of the video
+  PLL's (FPLL.000.037) reconfiguration controller, which is Altera's `altera_pll_reconfig`:
+  bit 1 = PLL locked, bit 0 = the controller's `mgmt_waitrequest`; the same byte at every
+  `0x2xx4_xxxx` address. **Stock idle answer: 0x02 0x02** [likely, from Altera's RTL; was
+  "0x03 or 0x02"]. hwtest v1 answered `02 00`, v2 `03 03`; the PIC polled for the whole run
+  both times. hwtest v3 answers from a real PLL + that IP, with a stepped fallback.
 - The 21 Oct capture contains only writes (U21 never went low). In true bit order they are a register
   set-up sequence at `0x1000_xxxx`/`0x1010_xxxx`/`0x111F_8100` followed by repeated writes to
   `0x1000_9018`/`0x1000_D218` whose data runs FF … FF, EE, DD, CC, … 11, 00. Nothing in it is the
@@ -244,6 +246,53 @@ extended with the status bit and the PLL ports, `scan*.py`, `dec*.py`, `lock0.py
   Whether the PIC later reconfigures the video PLL through `0x1000_00C4`/`0x1000_05xx` (other
   video modes?) and then waits for bit 0 again: watch for those addresses in the v2 log.
 
+### After hwtest v2 (22 Oct, second console run)
+
+v2's run (`notes/buslog-2026-10-22-hwtest.md`, second part): the PIC's set-up is the same as in
+v1; its last writes before the poll are a ramp of `0x1000_D110` (1 byte) / `0x1000_D114`
+(16 bits) over ~260 ms, `0x1010_0033` = 00 and then **4 bytes of 0 to `0x1000_0500`** (register
+0 of the reconfiguration block), and from T = 406 ms it polls `0x2004_0000` forever. v2
+answered `03 03` the whole time: its fallback stepping never ran because Quartus (power-up
+don't care) had turned the "fixed" flag into a constant 1 (fixed in `quartus/common/supernt.tcl`).
+
+**The block is Altera's `altera_pll_reconfig_core`** (Quartus IP,
+`ip/altera/altera_pll_reconfig/`): register map 0 mode, 1 status, 2 start, 3 N, 4 M, 5 C,
+6 phase shift, 7 K, 8 bandwidth, 9 charge pump, 0x1C VCO, 0x1F MIF, 6-bit word address, 32-bit
+data [likely: same port set, same 64-register window]. The decode's odd timer is the IP's reset
+logic: `self_reset` (counts to 340 after reset) and `fpll_dprio_init` (a 7-bit counter that
+writes 0 to DPRIO addresses 0–63, then finishes after a few more clocks; its only clear is the
+**asynchronous** one from a 2-FF reset synchroniser, `rst_n[1]` = the decode's `M009.019.5/6`).
+In iverilog, Altera's RTL drops `mgmt_waitrequest` **415 clocks** after reset, matching the
+decode's "flag sets ~410 clocks after configuration" under the reading *without* the sync
+clear; the other reading (counter held at 0, bit 0 stuck at 1) contradicts the RTL. In the IP,
+`mgmt_waitrequest` = (mode = waitrequest) ∧ (¬locked ∨ reset ∨ ¬init done ∨ reconfiguring ∨
+phase shift running), and 0 in polling mode; the decoded bit 0 has that shape
+(`014.016.8.T` = ¬busy ∧ ¬(DPRIO_RST_N ∧ ¬reset ∧ init done ∧ locked)). So:
+
+- bit 1 = locked, bit 0 = `mgmt_waitrequest` (1 = busy); idle and locked: **0x02**, both bytes
+  [likely; v1's `02 00` failed, so the PIC checks the second byte too, or reads 16 bits];
+- writing 0 to register 0 selects waitrequest mode (also the reset mode, so it changes nothing),
+  and the PIC then waits for "locked and not busy". Re-simulating the decoded logic with that
+  write (`~/scratch/v3/stat_inputs.py`, throwaway; both clear readings, LOCK0 and PHASE_DONE0
+  0/1) changes nothing either: 0x03/0x01 under the old reading, so v2's 03 03 = "busy".
+
+hwtest v3 (`quartus/common/pll_emul.sv`): a reconfigurable fPLL like FPLL.000.037 on **H16**
+(74.25 MHz × 16, outputs 148.5 / 21.6 / 148.5 MHz; spc.cor uses H16 as this PLL's reference,
+an input) behind the real `altera_pll_reconfig_top`, driven by the PIC's writes to
+`0x1000_00C4` (D0 = controller reset, D1 = PLL reset) and `0x1000_05xx` (lane bytes, commit on
+address bits 1–0 = 3 → Avalon write to register addr[7:2], held until waitrequest drops). The
+status the PIC reads is {locked, waitrequest} of that IP (candidate 0). Fallback in
+`link_logger.sv`: once the PIC has made ≥ 1000 status reads, every 5 s window with status reads
+and < 16 data writes steps to the next candidate: 02, 03, 01, 00, FF, bit 0 toggling per read,
+03 for 1 ms then 02, 01 1 ms + 03 1 ms then 02, 00 1 ms then 02 (the timed ones restart at each
+step and at every write to the block). The answer is fixed for good after 4 KB of data writes
+following the first status read with no step in between (the count restarts at each step);
+the screen shows the candidate, when polling began and when/with what it was fixed, plus the
+PLL's lock, waitrequest, H16 and output frequencies and the block writes. The port ignores
+reads until it is armed (both strobes high for 1 µs, or a write strobe with /RD high): the PIC
+holds /RD low until it sets up its port, which looked like a read at power-up. `link_loader.sv`
+now answers 0x02.
+
 ## The capture, decoded
 
 Logger events `S:DD+TT`. S = {AB20 AA20 AA19 U21} = {A2 A1 A0 /RD}; the cycle 3 → 9 → B → 5 → 1
@@ -288,9 +337,9 @@ data), so the file probably comes later than the 1024-event window. [guess]
    after /RD rises, see the FSM section; releasing sooner is safer and can't hurt the PIC.)
 2. A sink for the writes: at minimum a log or memory keyed by the 32-bit address, so we can see
    where the file goes (expect a long A=2 burst into one region).
-3. Reads: answer the stock status at `0x2xx4_xxxx` (0x03 or 0x02, both bytes; hwtest v2
-   finds out which), 0x00 elsewhere. The PIC polls `0x2004_0000` before it sends a file and
-   waits on a wrong answer (22 Oct). The
+3. Reads: answer the stock status at `0x2xx4_xxxx` (0x02, both bytes [likely]; hwtest v3
+   checks it on the console), 0x00 elsewhere. The PIC polls `0x2004_0000` before it sends a
+   file and waits on a wrong answer (22 Oct: `02 00` and `03 03` both failed). The
    other status bytes are registers whose meaning isn't decoded; 0x00 is their idle value in
    the simulation.
 
@@ -310,7 +359,8 @@ Also drive OE on /RD with a constant (e.g. 0xA5) to see whether and when the PIC
   stage `021.019.x`, not traced).
 - What the open-drain group read back at `0x01xx_xxxx` is for, and the meaning of the other
   `0x2xxx_xxxx` status registers.
-- When the PLL reconfiguration block reports busy (bit 0 = 0) and whether the PIC ever uses it.
+- Whether 02 02 is really what the PIC waits for (hwtest v3), and whether it reprograms the
+  video PLL later (v3 shows the block writes and the PLL's output frequency).
 - Whether the PIC waits on P14 or another pin.
 
 ## Tool (`tools/netlist.py`)

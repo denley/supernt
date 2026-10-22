@@ -153,19 +153,31 @@ build/hwtest/sine.hex: tools/mksine.py
 	mkdir -p build/hwtest
 	python3 -I tools/mksine.py $@
 
-# Simulation of quartus/hwtest: a PIC32 stand-in on the link that polls the status like the
-# console and only then sends a file (once with the stock answer, once waiting for 0x00 so the
-# candidate stepping has to find it), the SDRAM model, one 720p frame per screen page
-# (build/sim/hwtest-P-N.png), the I2S stream decoded in both framings (quartus/hwtest/sim).
+# Simulation of quartus/hwtest: a PIC32 stand-in on the link that sets up the video-PLL
+# reconfiguration block and polls the status like the console, and only then sends a file (once
+# with the answer of the emulated PLL, once with no H16 clock so the emulation answers 01 and
+# the fallback has to step to 02, once waiting for 0x00 so the stepping has to go further), the
+# SDRAM model, one 720p frame per screen page (build/sim/hwtest-P-N.png), the I2S stream decoded
+# in both framings (quartus/hwtest/sim). Uses Altera's PLL reconfiguration RTL from the Quartus
+# installation.
+QUARTUS_ROOT ?= $(HOME)/altera_lite/25.1std/quartus
+PLL_RECONFIG_IP = $(QUARTUS_ROOT)/../ip/altera/altera_pll_reconfig
+HWTEST_SIM_SRC = quartus/hwtest/sim/tb.sv quartus/hwtest/sim/models.v quartus/hwtest/sim/sdram_model.v \
+  quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/i2s_test.sv \
+  quartus/common/link_logger.sv quartus/common/pad_test.sv quartus/common/sdram_test.sv \
+  quartus/common/pll_emul.sv $(PLL_RECONFIG_IP)/altera_pll_reconfig_top.v \
+  $(PLL_RECONFIG_IP)/altera_pll_reconfig_core.v $(PLL_RECONFIG_IP)/altera_pll_reconfig_mif_reader.v \
+  $(QUARTUS_ROOT)/libraries/megafunctions/altera_std_synchronizer.v
 sim-hwtest: build/hwtest/screen.hex build/hwtest/font.hex build/hwtest/sine.hex
 	mkdir -p build/sim
-	iverilog -g2012 -o build/sim/hwtest.vvp -s tb quartus/hwtest/sim/tb.sv quartus/hwtest/sim/models.v \
-	  quartus/hwtest/sim/sdram_model.v quartus/hwtest/hwtest_top.sv quartus/common/textmode.sv quartus/common/i2s_test.sv \
-	  quartus/common/link_logger.sv quartus/common/pad_test.sv quartus/common/sdram_test.sv
+	iverilog -g2012 -o build/sim/hwtest.vvp -s tb $(HWTEST_SIM_SRC) 2> build/sim/hwtest-iverilog.log \
+	  || { grep -v warning build/sim/hwtest-iverilog.log; exit 1; }
 	rm -f build/sim/hwtest-*.png
-	cd build/sim && vvp -n hwtest.vvp > hwtest.log && grep -v '^log ' hwtest.log | tail -12
+	cd build/sim && vvp -n hwtest.vvp > hwtest.log && grep -v '^log ' hwtest.log | tail -24
 	grep -q '^LINK PASS' build/sim/hwtest.log
-	cd build/sim && vvp -n hwtest.vvp +want=00 +noframes > hwtest-want00.log && grep -v '^log ' hwtest-want00.log | tail -4
+	cd build/sim && vvp -n hwtest.vvp +noh16 +noframes > hwtest-noh16.log && grep -v '^log ' hwtest-noh16.log | tail -3
+	grep -q '^LINK PASS' build/sim/hwtest-noh16.log
+	cd build/sim && vvp -n hwtest.vvp +want=00 +noframes > hwtest-want00.log && grep -v '^log ' hwtest-want00.log | tail -3
 	grep -q '^LINK PASS' build/sim/hwtest-want00.log
 	python3 -I quartus/hwtest/sim/check.py build/sim
 

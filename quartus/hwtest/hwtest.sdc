@@ -1,12 +1,14 @@
 # Timing constraints for quartus/hwtest.
 create_clock -name clk -period 13.468 [get_ports clk]
+create_clock -name h16 -period 13.468 [get_ports h16]
 derive_pll_clocks
 derive_clock_uncertainty
 
-# The audio clock (12.288 MHz PLL) and the board clock only exchange slow status bits through
-# synchronisers.
+# The audio clock (12.288 MHz PLL), H16 and the video-PLL stand-in's outputs only exchange slow
+# status bits (synchronisers, Gray-coded counters) with the board clock domain.
 set mclk [get_clocks {apll|altera_pll_i|*[0].*|divclk}]
-set_clock_groups -asynchronous -group [get_clocks clk] -group $mclk
+set vclk [get_clocks {emu|vpll|altera_pll_i|*|divclk}]
+set_clock_groups -asynchronous -group [get_clocks clk] -group $mclk -group [get_clocks h16] -group $vclk
 
 # Video out to the AD9889B, as quartus/snes/snes.sdc.
 create_generated_clock -name pclk_out -source [get_ports clk] -invert [get_ports pclk]
@@ -28,3 +30,5 @@ set_false_path -from [get_ports {pad_t12}]
 # chips sample them (inverted clock on AB11).
 set_false_path -to [get_ports {sd_cs_n sd_ras_n sd_cas_n sd_we_n sd_a[*] sd_ba[*] sd_dq[*] sd_cke sd_dqm[*] sd_clk}]
 set_false_path -from [get_ports {sd_dq[*]}]
+# spc.cor's constant pins (static levels, switched once per SDRAM pass).
+set_false_path -to [get_ports {tie3[*] tie_hold[*]}]
