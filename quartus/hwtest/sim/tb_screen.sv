@@ -40,7 +40,7 @@ module tb;
     wire pp14, pj13, pk16;
     top #(.SCREEN_HEX("../hwtest/screen.hex"), .FONT_HEX("../hwtest/font.hex"),
           .SINE_HEX("../hwtest/sine.hex"), .HALF_SEC_FRAMES(0), .SD_ROWS(12'd3),
-          .VP_WAIT_US(1000), .VP_PRESS_US(2000), .VP_GAP_US(58000), .VP_DUMP_US(17000), .VP_DUMP_END(17000),
+          .VP_SCRIPT(0), .VP_WAIT_US(1000), .VP_PRESS_US(2000), .VP_GAP_US(58000), .VP_DUMP_US(17000), .VP_DUMP_END(17000),
           .QUIET_US(300)) dut (
         .clk(clk), .h16(h16), .pclk(pclk), .s0(s0), .s1(s1), .s2(s2), .ch1(ch1), .ch2(ch2), .ch3(ch3),
         .aud_mclk(am), .aud_bclk(ab), .aud_lrclk(al), .aud_sdata(ad),

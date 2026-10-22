@@ -36,6 +36,7 @@ module top #(
     parameter integer AUD_FIXED  = 0,         // audio framing: 0 I2S (v3), 1 LJ, -1 alternate
     parameter integer AUD_ATTEN  = 4,         // test tone attenuation, 6 dB steps
     parameter [11:0] SD_ROWS     = 12'd4095,  // SDRAM rows tested per bank (simulation: fewer)
+    parameter integer VP_SCRIPT   = 1,         // vpress: 1 = DOWN, DOWN, RUN (the chord), 0 = explore
     parameter integer VP_WAIT_US  = 4_000_000, // virtual presses (vpress.sv): wait after the UI starts,
     parameter integer VP_PRESS_US = 500_000,   //   press time,
     parameter integer VP_GAP_US   = 3_500_000, //   gap,
@@ -327,7 +328,7 @@ module top #(
     wire [31:0] vp_uit, vp_xt, vp_xdt, vp_pt, vp_out;
     wire        vp_go;
     vpress #(.WAIT_US(VP_WAIT_US), .PRESS_US(VP_PRESS_US), .GAP_US(VP_GAP_US),
-             .DUMP_US(VP_DUMP_US), .DUMP_END(VP_DUMP_END)) vp (
+             .DUMP_US(VP_DUMP_US), .DUMP_END(VP_DUMP_END), .SCRIPT(VP_SCRIPT)) vp (
         .clk(clk), .usec(l_us), .ui_rd(l_rd2), .wr(w_go), .wr_addr(w_addr), .xfer(l_xfer),
         .xfer_addr(l_xaddr), .mask(vmask), .state(vp_state), .btn(vp_btn), .n_press(vp_np),
         .press_go(vp_go), .dump(vp_dump), .press_t(vp_pt), .ui_t(vp_uit), .n_out(vp_out),

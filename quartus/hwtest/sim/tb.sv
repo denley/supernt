@@ -59,7 +59,7 @@ module tb;
     end
     top #(.SCREEN_HEX("../hwtest/screen.hex"), .FONT_HEX("../hwtest/font.hex"),
           .SINE_HEX("../hwtest/sine.hex"), .HALF_SEC_FRAMES(0),
-          .STEP_US(150), .SD_ROWS(12'd3), .VP_WAIT_US(300), .VP_PRESS_US(100), .VP_GAP_US(1000),
+          .STEP_US(150), .SD_ROWS(12'd3), .VP_SCRIPT(0), .VP_WAIT_US(300), .VP_PRESS_US(100), .VP_GAP_US(1000),
           .VP_DUMP_US(50), .VP_DUMP_END(20), .QUIET_US(200), .FILE_RUN(1024)) dut (
         .clk(clk), .h16(h16), .pclk(pclk), .s0(s0), .s1(s1), .s2(s2), .ch1(ch1), .ch2(ch2), .ch3(ch3),
         .aud_mclk(am), .aud_bclk(ab), .aud_lrclk(al), .aud_sdata(ad),

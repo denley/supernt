@@ -31,7 +31,12 @@ module vpress #(
     parameter integer DUMP_US   = 1_000_000,
     parameter integer DUMP_END  = 50_000,     // the dump window ends this long before a press
     parameter integer FILE_RUN  = 16384,      // documentation: link_logger's XFER
-    parameter integer OUT_BYTES = 65536
+    parameter integer OUT_BYTES = 65536,
+    // 1: instead of exploring, run the file: DOWN, DOWN, then bit 1 (RUN; hwtest v5 found the
+    // browser opens in 0:/SPC with the cursor on GO BACK, then SPC README.TXT, then the chord),
+    // and press nothing after that (v5's exploring went into the settings menu and toggled a
+    // setting)
+    parameter integer SCRIPT    = 0
 ) (
     input  wire        clk,             // 74.25 MHz
     input  wire [31:0] usec,            // time base (link_logger.sv)
@@ -68,7 +73,8 @@ module vpress #(
     localparam [3:0] B = 4'd0, Y = 4'd1, SE = 4'd2, ST = 4'd3, UP = 4'd4, DN = 4'd5, LT = 4'd6,
                      RT = 4'd7, A = 4'd8, X = 4'd9, L = 4'd10, R = 4'd11;
     function [3:0] order(input [5:0] k);
-        case (k)
+        if (SCRIPT != 0) order = k < 6'd2 ? DN : Y;
+        else case (k)
             6'd0:  order = A;   6'd1:  order = ST;  6'd2:  order = ST;  6'd3:  order = A;
             6'd4:  order = DN;  6'd5:  order = DN;  6'd6:  order = A;   6'd7:  order = UP;
             6'd8:  order = A;   6'd9:  order = RT;  6'd10: order = A;   6'd11: order = LT;
@@ -137,7 +143,7 @@ module vpress #(
                         on <= 1'b0;
                         mask_q <= 16'd0;
                         t0 <= usec;
-                    end else if (!on && dt >= GAP_US) begin
+                    end else if (!on && dt >= GAP_US && !(SCRIPT != 0 && k >= 6'd2)) begin
                         on <= 1'b1;
                         t0 <= usec;
                         press_t <= usec;
