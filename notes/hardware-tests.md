@@ -445,3 +445,11 @@ chord file was run (results below); the link part showed why nothing else could 
   always answered, the core follows the PIC's screen when it wakes (DOWN+SELECT expected, by the
   decode in notes/pic-link.md, "After a file"), ARAM in SDRAM, 64 KB save RAM, full PIC log.
   One-run test script: notes/snes-load.md, "Console test (v2)".
+
+- 23 Oct 2026, `14-q-snes_load` v2 (dd820dc): **works really well** (user). Recording
+  `~/scratch/cap/rec-20261023-115135.mkv` (from 11:51; earlier play not recorded): Kirby Super
+  Star played (The Great Cave Offensive), back to the PIC's browser without a power cycle
+  (DOWN+SELECT, the JB menu combo: the PIC watches the pad itself, v2 polls with the stock
+  waveform and follows the PIC's screen), then Super Mario RPG: new game, naming screen, intro,
+  Bowser's Keep. Kirby's Dream Land 3 also played (user). RESET not tried.
+  Photo: `photos/snes-load-v2-2026-10-23.jpg`.
