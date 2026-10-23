@@ -8,7 +8,8 @@
 #   tools/sdcore roms       copy the ROMs wrapped for q-snes_load (make load-spcs) into $SD/SPC:
 #                           "0 SA1 TEST.spc", "1 Gradius III.spc", "2 Kirby Super Star.spc",
 #                           "3 Kirby's Dream Land 3.spc", "4 Super Mario RPG.spc",
-#                           "5 SA1 TEST 20S.spc" (20 s song length; the player's browser sorts
+#                           "5 SA1 TEST 20S.spc" (20 s song length), "6 Yoshi's Island.spc",
+#                           "7 Star Fox.spc" (Super FX, v7; the player's browser sorts
 #                           case-sensitively: right below GO BACK)
 #
 # The console only loads SYSTEM/CORES/spc.cor, so each test is a swap of that file.
@@ -53,7 +54,8 @@ use)
 	;;
 roms)
 	for p in "sa1test:0 SA1 TEST" "gradius3:1 Gradius III" "kirbyss:2 Kirby Super Star" \
-	    "kdl3:3 Kirby's Dream Land 3" "smrpg:4 Super Mario RPG" "sa1test20:5 SA1 TEST 20S"; do
+	    "kdl3:3 Kirby's Dream Land 3" "smrpg:4 Super Mario RPG" "sa1test20:5 SA1 TEST 20S" \
+	    "yoshi:6 Yoshi's Island" "starfox:7 Star Fox"; do
 		f=build/snes_load/${p%%:*}.spc
 		if [ -f "$f" ]; then cp "$f" "$SD/SPC/${p#*:}.spc"; echo "SPC/${p#*:}.spc"; fi
 	done

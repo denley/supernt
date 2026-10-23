@@ -517,11 +517,12 @@ $(SNES_GSU_SIM)/obj/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_LOAD_SIM)/vlog/SA1Map.v 
 	  > $(SNES_GSU_SIM)/verilator.log 2>&1 || { tail -30 $(SNES_GSU_SIM)/verilator.log; exit 1; }
 
 # sim-snes-gsu-yoshi / -starfox: Yoshi's Island (2 MB, GSU-2) / Star Fox (1 MB, GSU-1) on the
-# GSU build: fast transfer, then SNES_GAME_FRAMES of the game.
+# GSU build: fast transfer, then SNES_GAME_FRAMES of the game, with the ROM latency histogram
+# (TB_ROMLAT; the SDRAM verdict for GSU carts comes from it).
 sim-snes-gsu-%: $(SNES_GSU_SIM)/obj/Vtb build/snes_load/%.spc
 	mkdir -p build/sim
 	rm -f build/sim/snes_gsu_$*-*.p?m
-	TB_FAST=1 TB_PULSE=45 TB_GAME=1 TB_QUIET=1 TB_TYPE=70 $(SNES_GSU_SIM)/obj/Vtb \
+	TB_ROMLAT=1 TB_FAST=1 TB_PULSE=45 TB_GAME=1 TB_QUIET=1 TB_TYPE=70 $(SNES_GSU_SIM)/obj/Vtb \
 	  $(SNES_GAME_FRAMES) build/sim/snes_gsu_$*- build/snes_load/$*.spc > build/sim/snes_gsu_$*.log; s=$$?; \
 	  tail -6 build/sim/snes_gsu_$*.log; \
 	  for f in build/sim/snes_gsu_$*-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s

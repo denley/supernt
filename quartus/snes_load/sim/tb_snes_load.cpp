@@ -608,7 +608,15 @@ int main(int argc, char **argv) {
     if (getenv("TB_TYPE")) ok_map &= rt == strtoul(getenv("TB_TYPE"), nullptr, 16);
     if (getenv("TB_MASK")) ok_map &= rm == strtoul(getenv("TB_MASK"), nullptr, 16);
     ok_diag = diag_frames > 0;
-    bool ok_sd = r->tb__DOT__sdram__DOT__errors == 0 && r->tb__DOT__dut__DOT__sd_late == 0 &&
+    // GSU carts (v7): a read that waited is no fault (the GSU takes its byte 2-6 clk_sys after
+    // the address change; sd_late counts against the SA-1's 2): with TB_ROMLAT the histogram
+    // decides instead: no byte later than 3 clk_sys edges, no address held >= 3 without its byte
+    bool gsu_cart = (r->tb__DOT__dut__DOT__rom_type >> 4) == 7;
+    bool lat_ok = true;
+    for (int k = 4; k < 16; k++) lat_ok &= lat_hist[k] == 0;
+    for (int k = 3; k < 16; k++) lat_ok &= miss_hist[k] == 0;
+    bool ok_sd = r->tb__DOT__sdram__DOT__errors == 0 &&
+                 (gsu_cart && romlat ? lat_ok : r->tb__DOT__dut__DOT__sd_late == 0) &&
                  r->tb__DOT__dut__DOT__sd_stall == 0 && r->tb__DOT__sdram__DOT__max_ref_gap <= 1673;
     bool ok = ok_link && ok_browser && ok_cursor && ok_load && ok_map && ok_sd && ok_menu && ok_aram && ok_p2 &&
               (game || (ok_wram && ok_pix && ok_lock && ok_ring && ok_diag));
