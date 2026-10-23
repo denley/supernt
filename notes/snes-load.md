@@ -20,7 +20,7 @@ during games: nothing woke it (its log: 0x2000 read as 0x24 279 times). v6 (this
 in short") sends it SELECT alone instead: **works on the console** (23 Oct). v7 ("v7 in short")
 adds the **Super FX (GSU)** next to the SA-1; not yet run on the console.
 
-## v7 in short (23-24 Oct 2026): Super FX
+## v7 in short (23-24 Oct 2026): Super FX (works on the console, v7.2)
 
 Goal: Yoshi's Island (GSU-2) and Star Fox (GSU-1) in the same core as the SA-1 games.
 

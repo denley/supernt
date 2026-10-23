@@ -35,7 +35,13 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
-## Next session: snes_load v7, Super FX (prepared 24 Oct, card ready)
+## snes_load v7.2 (19-q-snes_load-v72, 24 Oct morning) results
+
+Denley, 24 Oct ~09:30: **everything works perfectly** on `19-q-snes_load-v72.cor` (SA-1 + Super
+FX in one core): Yoshi's Island (Super FX 2), Star Fox (Super FX 1) and the SA-1 games. It stays
+installed as spc.cor. 16-18 are superseded (kept on the card for now).
+
+## Next session: snes_load v7, Super FX (prepared 24 Oct; done, results above)
 
 The SNES core with the Super FX next to the SA-1 (`notes/snes-load.md`, "v7 in short"). In
 simulation Yoshi's Island reaches its Super FX-drawn Nintendo logo and Star Fox its starfield
