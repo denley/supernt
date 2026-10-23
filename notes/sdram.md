@@ -310,6 +310,31 @@ J17 was held at **1** in hwtest v3–v5 and memtest v1 (pinclass's reading); by 
 above stock drives it 0. memtest v2 drives all of these at the levels in the table and
 binary-codes which ones matter for each chip.
 
+## memtest v2 result (23 Oct 2026): G1 works with J8 low, G2 has its own address bus
+
+Console run 23 Oct ~22:00 (`~/scratch/cap/rec-20261023-215859.mkv`, 8 rounds; screens
+`photos/memtest-v2-*-2026-10-23.jpg`: f113 U4, f119 U5/U16, f125 column walk, f131 raw):
+
+- **U4**: byte B clean in all 16 hypotheses; byte A silent in all (none of the 21 candidates,
+  D9/E10 or C13/C15 is its enable).
+- **G1 (D12 group) answers when J8 is low** [confirmed]: its pass/fail pattern over
+  hypotheses 2-11 decodes to candidate 20 = **J8** with no contradiction. Raw words: G1 returns
+  exactly the expected bytes, **column 0 at r3 and column 1 at r4**, one clock earlier than U4
+  (same MRS, CL3 assumed): every capture point the test compared (f3.5-r5) was one late, which
+  is why the error counts stayed near 0FD0000. So the decoded pin map (shared A0-A9/A11/BA,
+  D12/D13/G13/E12/H9, data N8...J11, clock H8) is right for G1, and J8 is its DQM (or CS).
+- **G2 (B6 group) drives when B13 is low** (pattern decodes to candidate 17 = **B13**). But for
+  every address it returns the byte of the last row written with D17 = 0 (bank 3 row 3071 =
+  0xBFF; matches pat2 exactly in all ten "B13 low" rows, the 0x08 difference from row 4095 being
+  pat2's term for row bit 10 = D17), and the column walk sees only its last entry. So G2
+  **ignores the shared address and bank pins**: it has its own address bus, held constant in
+  this test. D17 is one of its address lines. The candidates still at 0 (A14 B5 G16 H13 A13 A15
+  B15 C11 E14 E15 E16 F13 F15 G15 G17 G18 A5 B16 J17) and C13/C15 are where to look: in spc.cor
+  the G2 port only ever addresses the few locations its constant address pins allow.
+- Revised controller-2 table: G1 = one x8 chip on the shared bus (+ J8 low); G2 = a second
+  x8 chip with its own command pins, data pins and (mostly constant) address pins, enabled by
+  B13 low.
+
 ## Constant pins: AB10 and the open-drain group (after hwtest v1, Oct 2026)
 
 hwtest v1 on the console (22 Oct, `notes/hardware-tests.md`): all eight capture points wrong on

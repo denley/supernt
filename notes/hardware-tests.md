@@ -35,6 +35,14 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## memtest v2 (15-q-memtest, 23 Oct) results
+
+Run 23 Oct ~22:00 (`~/scratch/cap/rec-20261023-215859.mkv`; the first attempt showed "no
+signal" because capview's ffmpeg had died at 21:55 when a phone viewer disconnected and was
+not restarted; restarting capview fixed it). Details in `notes/sdram.md`, "memtest v2 result":
+G1 works with J8 low (data one clock earlier than U4: col 0 at r3); G2 drives with B13 low but
+ignores the shared address pins; U4 byte A still silent.
+
 ## Next session: memtest v2 (prepared 23 Oct)
 
 memtest v1 plus spc.cor's top-bank constants (`notes/sdram.md`, "memtest v1 result"):
