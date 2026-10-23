@@ -96,13 +96,26 @@ not only the game sims.
 pins, SDRAM settings and SDC all from `quartus/snes_load`), to test the Super FX without the
 timing doubt. SA-1 carts don't run on it.
 
-Known issue: in Yoshi's Island the ARAM port still has ~2 reads per 6 s that start after the
-third k = 0 since their request (`n_ar_late`; Star Fox and the SA-1 games 0). In both cases
-the ROM sequencer was 6 cycles into back-to-back reads when the ARAM could have started, and
-the controller starts ARAM operations only with the ROM side idle or exactly 3 cycles into a
-read. Effect at worst: an S-DSP/SPC700 read gets the previous byte. Allowing a start at cnt 6
-looks safe for the DQ bus but changes the controller's command schedule; left for after the
-console test.
+Fixed after the first v7 builds (`aram-case3`, 24 Oct morning; both found with a new GSU-like
+phase C in `make sim-sdram-rom8`: byte reads, addresses held 1-6 clk_sys, reads back to back):
+- **late ARAM reads**: Yoshi's Island had ~2 per 6 s, and 26 over a 700-frame run (11.7 s;
+  `n_ar_late`; Star Fox and the SA-1 games 0). Each time the ROM sequencer was in the last cycle
+  (cnt 6) of a read started at k = 4 when the ARAM could have started, and the controller
+  started ARAM operations only with the ROM side idle (case I) or 3 cycles into a read (case
+  II), so such a read blocked both k = 0 edges of its run. Effect: an S-DSP/SPC700 read got the
+  previous byte (phase C: 18 late, 11 wrong bytes). **Case III** now starts it in that last
+  cycle (bank 3 vs the ROM's banks 0-2, its PRECHARGE was the edge before; from slot 1 on it is
+  case I; a write goes as write I: the read's last word left DQ by slot 2 + tHZ, the WRITE drives
+  it at slot 3). Phase C: 0 late, 0 wrong, ~1500 case III starts. Yoshi's Island, 360 frames:
+  PASS, ARAM 0 late (v7.0: 2 by then, all 26 of its 700 frames at ROM `st 3 cnt 6`); SA-1
+  regression PASS. Build: combined clk_mem setup -0.29 ns at slow 85 °C (SPC700 -> `upd_d`, the
+  ARAM decision), which v7.2 (below) addresses.
+- **lane 0 after back-to-back reads**: a ROM read started right after an even-address read
+  got lo_sel set again by the old read's copy to cap_lo (rd2[CPY] came at the new read's
+  cnt = 1, after its clear), so rom_q[7:0], the GSU's lane, showed the old word until the next
+  read (phase C: 336 wrong bytes). The ACT now drops the pending copy (the core has left that
+  word). Yoshi's/Star Fox's traffic rarely does this (the sims' ROM histograms had 1 and 6
+  addresses left before their byte).
 
 ### v7 simulation
 
