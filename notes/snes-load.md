@@ -299,7 +299,7 @@ Make targets: `out/q-snes_load.cor`, `load-spcs` (the test files), `sim-sdram-ro
 ports) and a BW-RAM clear port (snes_sdram ties them off); the SDRAM models end bursts only on
 READ/WRITE/BST/PRE of the bank and flag a WRITE while read data is due.
 
-## The file (`tools/rom2spc.py ROM OUT.spc [--title T] [--length S]`)
+## The file (`tools/rom2spc.py ROM OUT.spc [--title T] [--length S] [--save-probe RAM]`)
 
 | file offset | link address | contents |
 |---|---|---|
@@ -424,6 +424,39 @@ firmware writes saves (`/SAVES/SNES/`, with its "Save?" prompt) only for its own
 cartridge core, not for the SPC player, which has nothing to save. So v2 keeps saves only while
 the console is on: the RAM is left as it is when the same game (ROM CRC-32) is booted again,
 and cleared when another game is booted (one game's saves at a time; a power cycle loses them).
+
+Checked 24 Oct on the card itself: the PIC has written **nothing** to it in any of our sessions
+(`SAVES/SNES/` and every file outside `SPC/`/`TESTCORES/` are unchanged since 2021; no
+settings file either, so the settings live in the PIC's flash). The firmware is encrypted, the
+SD socket is on the PIC32, and the main SNES core that the JB saves for is inside the firmware,
+not a file we can replace. Every other way to the card considered (the FPGA driving the SD
+card, the PIC's own flash, SDRAM surviving a reconfiguration into the main core, a cartridge's
+SRAM + CopySNES) is either impossible or unsafe.
+
+### Saves to the SD card: the probe (prepared 24 Oct, not yet run)
+
+The one way left to the stock behaviour: the JB decides save RAM for a ROM from its SNES
+header, and its "playing" mode after an SPC file looks like its game mode (the browser comes
+back on SELECT with BACK TO GAME). If that save code also runs for an SPC file whose bytes at
+the header offsets look like a ROM with save RAM, the PIC would load `/SAVES/SNES/<file
+name>.sav` into the core after the file and read it back and write it on DOWN+SELECT (with
+"Save?" if PROMPT WHEN SAVING RAM is on). Our wrapped files never showed it that: their header
+offsets fall in the silent SPC's RAM, which is zero there. [guess, low odds: the save code more
+likely belongs to the ROM loader path alone]
+
+`rom2spc.py --save-probe 05` plants plain SNES headers (map 20 at file offsets 0x7FC0 and
+0x81C0, map 21 at 0xFFC0 and 0x101C0, type 02 = ROM+RAM+battery, RAM size 05 = 32 KB, checksum
+pair valid over the whole file) in that RAM area; the core ignores it. `8 SAVE PROBE.spc` (the
+SA-1 test ROM, `make load-spcs`) and a 32 KB `SAVES/SNES/8 SAVE PROBE.sav` ("SNT SAVE PROBE "
+repeated, first byte 0x53) are on the card. v7.2 needs no change to answer it: a save load
+shows as a 32 KB write run in its link log (or as file bytes beyond 0x18200 / a CRC mismatch,
+if it lands at 0xFF00 and above), a save write as a read run after DOWN+SELECT, and either way
+the `.sav` on the card changes. Test plan: notes/hardware-tests.md, "Next session: the save
+probe".
+
+If the PIC takes it: v8 answers the PIC's save reads from BW-RAM and takes its save writes into
+BW-RAM, and `rom2spc.py` plants each game's real RAM size. If not, SD saves stay impossible from
+our core, and the in-RAM saves above are what there is.
 
 ## SDRAM ARAM port (v2, `sdram_rom8.sv`)
 

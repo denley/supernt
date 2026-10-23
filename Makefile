@@ -451,9 +451,18 @@ build/snes_load/yoshi.spc: tools/rom2spc.py
 build/snes_load/starfox.spc: tools/rom2spc.py
 	mkdir -p build/snes_load
 	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Star Fox (U) (V1.2) [!].smc" $@ --title "STAR FOX"
+# Saves to the SD card, the probe (notes/snes-load.md): the SA-1 test with SNES headers declaring
+# 32 KB of save RAM in the SPC RAM area, and a 32 KB save for it ("SNT SAVE PROBE " repeated).
+build/snes_load/saveprobe.spc: build/snes/sa1test.sfc tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py $< $@ --title "SAVE PROBE" --save-probe 05
+build/snes_load/saveprobe.sav:
+	mkdir -p build/snes_load
+	python3 -I -c "open('$@', 'wb').write((b'SNT SAVE PROBE ' * 2185)[:32768])"
 load-spcs: build/snes_load/sa1test.spc build/snes_load/gradius3.spc build/snes_load/kirbyss.spc \
   build/snes_load/kdl3.spc build/snes_load/smrpg.spc build/snes_load/sa1test20.spc \
-  build/snes_load/yoshi.spc build/snes_load/starfox.spc
+  build/snes_load/yoshi.spc build/snes_load/starfox.spc build/snes_load/saveprobe.spc \
+  build/snes_load/saveprobe.sav
 .PHONY: load-spcs
 
 # End-to-end simulation of quartus/snes_load (notes/snes-load.md, "Simulation"): Verilator, the

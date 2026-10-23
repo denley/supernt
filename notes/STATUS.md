@@ -71,7 +71,10 @@ Card" loader, BIOS files are on the card in `/BIOS`).
    Star Fox and the SA-1 games all work (`notes/hardware-tests.md`, "snes_load v7.2 results";
    `TESTCORES/19-q-snes_load-v72.cor` is the card's spc.cor).
 2. Optional: DSP-1 in our core (small; vendor `DSPn`), larger ROMs, more games.
-3. Not possible (decoded): saves to SD from the SPC player context.
+3. Saves to SD: one last test prepared (24 Oct), the **save probe** (`notes/hardware-tests.md`,
+   "Next session: the save probe"): an SPC file that looks like a ROM with 32 KB of save RAM,
+   to see whether the PIC gives it the JB's save handling. Low odds; if it fails, saves to SD
+   are out of reach from the SPC player's slot (`notes/snes-load.md`, "Saves (v2)").
 
 ## Console test workflow (keep runs few: each costs Denley a card swap and menu navigation)
 

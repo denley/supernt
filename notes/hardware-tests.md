@@ -35,6 +35,29 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session: the save probe (prepared 24 Oct)
+
+Question: does the PIC give an SPC file the JB's save handling (`/SAVES/SNES/*.sav`) when the
+file looks like a ROM with save RAM? (`notes/snes-load.md`, "Saves to the SD card: the
+probe".) No new core: `19-q-snes_load-v72` stays spc.cor. On the card: `SPC/8 SAVE PROBE.spc`
+and `SAVES/SNES/8 SAVE PROBE.sav` (32 KB, "SNT SAVE PROBE " repeated).
+
+1. Capture running (`tools/capview.py`), so the log pages can be read from the recording.
+2. Tools → Play SPC Files. In the browser: START (menu) → SYSTEM → MENU OPTIONS, turn **PROMPT
+   WHEN SAVING RAM** on (the JB's "Save?" box; off by default), back with SELECT.
+3. **8 SAVE PROBE** (Y). Diagnostics page, then the SA-1 test screen.
+4. After ~5 s, **DOWN+SELECT**. Note any "Save?" box; answer yes.
+5. In the browser, **8 SAVE PROBE** again (Y); note any box. When the test screen is back,
+   **L+R+SELECT** (status page, ~5 s), **L+R+SELECT** again (log view: let it page through all
+   pages), **L+R+SELECT** (off).
+6. DOWN+SELECT, then **B** up to the root and once more: note any "game will be ended / cannot
+   save" warning. Power off, card to homebox.
+
+Reading: `SAVES/SNES/` (did `8 SAVE PROBE.sav` change, any new file?); the log for a 32 KB write
+run (D0 53) after the file or a read run after DOWN+SELECT; FILE bytes > 0x18200 or a CRC
+MISMATCH on the status page. Any of these = the PIC treats it as a game with save RAM (→ v8,
+saves to SD). None = SD saves are out of reach from the SPC player's slot.
+
 ## snes_load v7.2 (19-q-snes_load-v72, 24 Oct morning) results
 
 Denley, 24 Oct ~09:30: **everything works perfectly** on `19-q-snes_load-v72.cor` (SA-1 + Super

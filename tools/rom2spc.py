@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Wrap a SNES ROM in a file the Super Nt's SPC player accepts and sends over the PIC32 link.
 
-Usage: rom2spc.py ROM OUT.spc [--title TEXT] [--pad SIZE] [--length SECONDS]
+Usage: rom2spc.py ROM OUT.spc [--title TEXT] [--pad SIZE] [--length SECONDS] [--save-probe RAM]
 
 The SPC player (Tools -> "Play SPC Files", JB7.2) checks that a file is an SPC and then writes
 the whole file verbatim to link address 0x0000_FF00 + file offset (notes/hardware-tests.md,
@@ -29,6 +29,12 @@ so ROM byte k arrives at link address 0x2_0100 + k. Info block (little-endian):
 --pad SIZE appends filler after the ROM (whole file SIZE bytes), only for transfer tests.
 --length SECONDS sets the ID666 song length (default 999, the most the text tag holds; a
 short one is a test of what the player does when a "song" ends: snes_load v2 logs it).
+--save-probe RAM plants plain (no chip) SNES headers declaring save RAM size byte RAM (05 = 32
+KB) in the SPC's RAM area, where a PIC reading the file as a ROM would look: LoROM at file
+offset 0x7FC0, HiROM at 0xFFC0, and both again 512 bytes later (0x81C0, 0x101C0: the file size
+is 512 more than a multiple of 32 KB, which looks like a copier header). The core ignores that
+area. A test of whether the player gives such a file the JB's save handling
+(notes/snes-load.md, "Saves to the SD card: the probe").
 Prints the sizes and CRC-32s the core's diagnostics page shows (whole file, ROM part) and the
 header detection.
 """
@@ -70,6 +76,26 @@ def silent_spc(title, length=999):
     spc = hdr + ram + dsp + bytes(64) + ram[0xFFC0:]
     assert len(spc) == 0x10200
     return bytearray(spc)
+
+
+PROBE_OFFS = ((0x7FC0, 0x20), (0x81C0, 0x20), (0xFFC0, 0x21), (0x101C0, 0x21))
+
+
+def plant_probe_headers(data, ram_size, title):
+    """--save-probe: SNES headers (title, map 20 LoROM / 21 HiROM, type 02 = ROM+RAM+battery,
+    the given RAM size, region 01, maker 01) in the SPC RAM area, with a checksum pair over the
+    whole file that adds up the way a real ROM's does."""
+    for off, mapping in PROBE_OFFS:
+        h = bytearray(0x40)
+        h[0:21] = tag(title.upper(), 21).replace(b'\0', b' ')
+        h[0x15], h[0x16], h[0x17], h[0x18], h[0x19], h[0x1A] = mapping, 0x02, 0x0A, ram_size, 1, 1
+        struct.pack_into('<HH', h, 0x1C, 0xFFFF, 0x0000)
+        struct.pack_into('<H', h, 0x3C, 0x8000)          # reset vector
+        data[off:off + 0x40] = h
+    csum = sum(data) & 0xFFFF
+    for off, _ in PROBE_OFFS:
+        struct.pack_into('<HH', data, off + 0x1C, csum ^ 0xFFFF, csum)
+    return csum
 
 
 def header_guess(rom):
@@ -130,6 +156,8 @@ def main():
     ap.add_argument('--title', help='name shown on the diagnostics page and in the ID666 tag')
     ap.add_argument('--pad', type=lambda s: int(s, 0), default=0)
     ap.add_argument('--length', type=int, default=999, help='ID666 song length in seconds (1-999)')
+    ap.add_argument('--save-probe', type=lambda s: int(s, 16), metavar='RAM',
+                    help='plant SNES headers with this RAM size byte (hex) in the SPC RAM area')
     a = ap.parse_args()
 
     rom = open(a.rom, 'rb').read()
@@ -151,9 +179,13 @@ def main():
     name = title.encode('ascii', 'replace')[:32]
     info[0x20:0x40] = name + b' ' * (32 - len(name))
     spc[INFO_OFF:INFO_OFF + 64] = info
-    data = bytes(spc) + rom
+    data = bytearray(spc + rom)
     if a.pad > len(data):
         data += bytes(((i * 7) ^ (i >> 8)) & 0xFF for i in range(len(data), a.pad))
+    if a.save_probe is not None:
+        csum = plant_probe_headers(data, a.save_probe, title)
+        print(f'  save probe: headers with RAM size {a.save_probe:02X} at file offsets '
+              + ', '.join(f'0x{o:X}' for o, _ in PROBE_OFFS) + f', checksum {csum:04X}')
     open(a.out, 'wb').write(data)
 
     print(f'{a.out}: {len(data)} bytes = 0x{len(data):X}, CRC-32 whole file {zlib.crc32(data):08X}')
