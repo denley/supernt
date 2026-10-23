@@ -35,6 +35,19 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session: memtest v2 (prepared 23 Oct)
+
+memtest v1 plus spc.cor's top-bank constants (`notes/sdram.md`, "memtest v1 result"):
+16 hypotheses of ~1 s, four pages of 6 s (U4 errors, U5/U16 errors, column walk, raw). Same
+procedure as v1 (slot 15, `tools/sdcore use 15`); leave it **~60 s** so every page shows a full
+round (round ≥ 2). Reading it:
+- Page 1 (U4): B f3.5/r4 = 000000 in every row (control). Byte A clean in row 1 = found
+  among the candidates; its index is the binary number with bit k = 1 where row 2+k fails.
+- Page 2 (U5/U16): the same per chip (G1, G2). Clean in 1 but not 0 = a candidate is needed;
+  rows 2-6 give the index (`cand` order in `quartus/memtest/memtest_top.sv`). Row 12 (D9/E10
+  released) failing = one of them is a CKE; row 13 = C13/C15 matter after all.
+- Pages 3-4: column walk 000 and raw col 0 at r4 where a chip works.
+
 ## memtest v1 (15-q-memtest, 23 Oct) results
 
 Run 23 Oct ~21:15 (`~/scratch/cap/rec-20261023-211505.mkv`, 27 rounds; screens

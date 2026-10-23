@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Super Nt memory test core (memtest v1): tests all three SDRAM chips with the pin map of
-// notes/sdram.md ("Which chip is which", "Controller 2"), results on a 2-page text screen
-// (screen.txt; pages alternate every 6 s).
+// Super Nt memory test core (memtest v2): tests all three SDRAM chips with the pin map of
+// notes/sdram.md ("Which chip is which", "Controller 2"), results on a 4-page text screen
+// (screen.txt; pages cycle every 6 s).
 //   U4      - AS4C8M16SA x16 on the bottom-bank bus: sdram_test.sv at spc.cor's levels (AB10
 //             low, constant pins at their stock level), errors per byte: A = 2A (never
 //             answered so far), B = 3B (works)
 //   U5/U16  - IS42S81600F pair on the top-bank bus: mem2_test.sv, errors per chip, column walk,
 //             raw bytes of the first read
-// Hypotheses (one pass of both tests each, then the next; ~1 s per hypothesis): C13 and C15,
-// which spc.cor drives low from controller 2's logic and every earlier core left released,
-// are 0 both released, 1 both low, 2 C13 low, 3 C15 low. If U4's second DQM ("chip A") or
-// the pair's DQM is one of them, the matching rows go clean.
+// v1 (23 Oct) found byte A of U4 and both U5/U16 chips silent with C13/C15 low or released.
+// v2 adds spc.cor's top-bank constants (notes/sdram.md, "memtest v1 result"): 21 pins at 0
+// (cand[0..20], low or released), D9/E10 at 1 (hi_pins), and C13/C15 (low or released).
+// Hypotheses (one pass of both tests each, ~1 s; 16 per round):
+//   0      everything released (= memtest v1's levels)
+//   1      stock: candidates low, D9/E10 high, C13/C15 low
+//   2-6    stock, except candidates whose index has bit (h-2) set are released
+//   7-11   stock, except candidates whose index has bit (h-7) clear are released
+//   12     stock, D9/E10 released          13  stock, C13/C15 released
+//   14     stock, J17 (cand 19) high (the level hwtest v3-v5 and v1 drove)   15  stock
+// If a chip needs one candidate low it is clean in 1, 12-15 (14 unless it is J17), fails in 0,
+// and hypotheses 2-6 spell the candidate's index (fails in 2+k <=> bit k = 1).
 // Pin rules (notes/STATUS.md): every pin here is one spc.cor drives, used as it does; group 2's
-// data and C13/C15 are only ever low or released.
+// data, C13/C15 and the candidates are only ever low or released (J17 in 14: high, as before),
+// D9/E10 high or released; the constants at 4 mA, like hwtest's.
 module top #(
     parameter SCREEN_HEX = "../../build/memtest/screen.hex",
     parameter FONT_HEX   = "../../build/hwtest/font.hex",
@@ -36,7 +45,11 @@ module top #(
     inout  wire [15:0] sd_dq,   // 7:0 byte A (2A), 15:8 byte B (3B)
     output wire       sd_cke,   // AB10: DQM of byte B, low
     output wire [18:0] tie3,    // spc.cor's constant pins, at their level
-    output wire [23:0] tie_hold,
+    output wire [22:0] tie_hold, // 4A constants, K19, K20 (J17 moved to cand)
+    // top-bank constants: cand = A14 B5 G16 H13 A13 A15 B15 C11 E14 E15 E16 F13 F15 G15 G17
+    // G18 A5 B13 B16 J17 J8 (0 in spc.cor), hi_pins = D9 E10 (1)
+    inout  wire [20:0] cand,
+    inout  wire [1:0] hi_pins,
     // U5/U16
     output wire       m_clk,    // H8
     output wire [9:0] m_a,      // N6 P6 P7 R7 P8 R9 H6 F7 D7 C8
@@ -50,19 +63,35 @@ module top #(
     inout  wire       m_c15     // C15
 );
     localparam [18:0] TIE3_LEVEL = 19'b111_0000000000000000;
-    localparam [23:0] HOLD_LEVEL = 24'b1_00_11111111_0000000000000;
+    localparam [22:0] HOLD_LEVEL = 23'b00_11111111_0000000000000;
     assign tie3 = TIE3_LEVEL;
     assign tie_hold = HOLD_LEVEL;
+    genvar gi;
 
     // ---------------------------------------------------------------- hypotheses
-    reg  [1:0]  h = 2'd0;
+    localparam integer NC = 21, J17_IDX = 19;
+    reg  [3:0]  h = 4'd0;
     reg  [15:0] round = 16'd0;
     reg  [17:0] settle = 18'd0;
     reg         running = 1'b0, start = 1'b0, u4_got = 1'b0, m2_got = 1'b0;
-    wire        c13_low = h == 2'd1 || h == 2'd2;
-    wire        c15_low = h == 2'd1 || h == 2'd3;
-    assign m_c13 = c13_low ? 1'b0 : 1'bz;
-    assign m_c15 = c15_low ? 1'b0 : 1'bz;
+    function [NC-1:0] cand_rel(input [3:0] hh);      // candidates released (else low)
+        integer i;
+        begin
+            for (i = 0; i < NC; i = i + 1)
+                cand_rel[i] = hh == 4'd0 ? 1'b1 :
+                              (hh >= 4'd2 && hh <= 4'd6)  ? (i >> (hh - 2)) & 1 :
+                              (hh >= 4'd7 && hh <= 4'd11) ? !((i >> (hh - 7)) & 1) : 1'b0;
+        end
+    endfunction
+    wire [NC-1:0] crel = cand_rel(h);
+    wire        mc_low = h != 4'd0 && h != 4'd13;
+    wire        hi_on  = h != 4'd0 && h != 4'd12;
+    assign m_c13 = mc_low ? 1'b0 : 1'bz;
+    assign m_c15 = mc_low ? 1'b0 : 1'bz;
+    assign hi_pins = hi_on ? 2'b11 : 2'bzz;
+    generate for (gi = 0; gi < NC; gi = gi + 1) begin : g_cand
+        assign cand[gi] = gi == J17_IDX && h == 4'd14 ? 1'b1 : crel[gi] ? 1'bz : 1'b0;
+    end endgenerate
 
     // ---------------------------------------------------------------- U4
     wire [15:0]  sdq_out;
@@ -85,7 +114,6 @@ module top #(
     wire [87:0]  m2_cw;
     wire [127:0] m2_raw;
     assign g1_dq = g1_oe ? g1_out : 8'hzz;
-    genvar gi;
     generate for (gi = 0; gi < 8; gi = gi + 1) begin : g_od
         assign g2_dq[gi] = g2_low[gi] ? 1'b0 : 1'bz;
     end endgenerate
@@ -98,13 +126,13 @@ module top #(
         .passes(m2_passes), .last_err(m2_err), .last_cw(m2_cw), .last_raw(m2_raw));
 
     // results of each hypothesis's last pass
-    reg [191:0] r_u4  [0:3];
-    reg [199:0] r_m2  [0:3];
-    reg [87:0]  r_cw  [0:3];
-    reg [127:0] r_raw [0:3];
-    reg [7:0]   r_n   [0:3];
+    reg [191:0] r_u4  [0:15];
+    reg [199:0] r_m2  [0:15];
+    reg [87:0]  r_cw  [0:15];
+    reg [127:0] r_raw [0:15];
+    reg [7:0]   r_n   [0:15];
     integer k;
-    initial for (k = 0; k < 4; k = k + 1) begin
+    initial for (k = 0; k < 16; k = k + 1) begin
         r_u4[k] = 0; r_m2[k] = 0; r_cw[k] = 0; r_raw[k] = 0; r_n[k] = 0;
     end
     // set the pins of hypothesis h, wait SETTLE, start both tests, wait for both, store, next
@@ -121,8 +149,8 @@ module top #(
             if ((u4_got || u4_done) && (m2_got || m2_done)) begin
                 r_n[h] <= r_n[h] + 8'd1;
                 running <= 1'b0; settle <= 18'd0;
-                h <= h + 2'd1;
-                if (h == 2'd3) round <= round + 16'd1;
+                h <= h + 4'd1;
+                if (h == 4'd15) round <= round + 16'd1;
             end
         end
     end
@@ -140,38 +168,38 @@ module top #(
         vy_d <= vy;
         if (vy == 10'd719 && vy_d == 10'd718) begin
             frames <= frames + 24'd1;
-            if (pframes == PAGE_FRAMES - 1) begin pframes <= 10'd0; page <= {3'd0, ~page[0]}; end
+            if (pframes == PAGE_FRAMES - 1) begin pframes <= 10'd0; page <= {2'd0, page[1:0] + 2'd1}; end
             else pframes <= pframes + 10'd1;
         end
     end
     wire [767:0] stat;
-    assign stat[0 +: 32]  = {round, 14'd0, h};
+    assign stat[0 +: 32]  = {round, 12'd0, h};
     assign stat[32 +: 32] = {16'd0, u4_passes};
     assign stat[64 +: 32] = {16'd0, m2_passes};
     assign stat[96 +: 32] = {frames, 4'd0, page};
     assign stat[767:128]  = 640'd0;
-    // table rows (screen.txt): page 0 U4 rows 5-8, U5/U16 rows 12-15; page 1 column walk rows
-    // 5-8, raw rows 12-15
+    // table rows (screen.txt): rows 3-18 = hypotheses 0-15 on every page: page 0 U4, 1 U5/U16
+    // errors, 2 column walk, 3 raw
     wire [4:0] rn = row_next;
-    wire       t1 = rn >= 5'd5 && rn <= 5'd8;
-    wire       t2 = rn >= 5'd12 && rn <= 5'd15;
-    wire [1:0] th = t1 ? rn[1:0] - 2'd1 : rn[1:0];   // 5-8 -> 0-3, 12-15 -> 0-3
+    wire       tr = rn >= 5'd3 && rn <= 5'd18;
+    wire [4:0] thx = rn - 5'd3;
+    wire [3:0] th = thx[3:0];
     reg  [255:0] rowstat = 256'd0;
     reg          row_blank = 1'b0;
     integer j;
     always @(posedge clk) begin
         rowstat <= 256'd0;
         row_blank <= 1'b0;
-        if (page == 4'd0 && t1)
+        if (page == 4'd0 && tr)
             for (j = 0; j < 8; j = j + 1) rowstat[32*j +: 32] <= {r_n[th], r_u4[th][24*j +: 24]};
-        else if (page == 4'd0 && t2)
+        else if (page == 4'd1 && tr)
             for (j = 0; j < 8; j = j + 1) rowstat[32*j +: 32] <= {7'd0, r_m2[th][25*j +: 25]};
-        else if (page == 4'd1 && t1)
+        else if (page == 4'd2 && tr)
             for (j = 0; j < 8; j = j + 1) rowstat[32*j +: 32] <= {21'd0, r_cw[th][11*j +: 11]};
-        else if (page == 4'd1 && t2)
+        else if (page == 4'd3 && tr)
             rowstat[127:0] <= r_raw[th];
     end
-    textmode #(.SCREEN_HEX(SCREEN_HEX), .FONT_HEX(FONT_HEX), .PAGES(2), .FLAG_WORD(23)) txt (
+    textmode #(.SCREEN_HEX(SCREEN_HEX), .FONT_HEX(FONT_HEX), .PAGES(4), .FLAG_WORD(23)) txt (
         .clk(clk), .page(page), .stat(stat), .rowstat(rowstat), .row_blank(row_blank),
         .row_next(row_next), .r(vr), .g(vg), .b(vb), .hs(vhs), .vs(vvs), .de(vde), .frame_y(vy),
         .cx(), .cy(), .cell_row(), .cell_col(), .ext_q(8'h20), .fg());

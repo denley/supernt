@@ -17,5 +17,5 @@ set_false_path -to [get_ports {m_clk m_a[*] m_a11 m_ba[*] g1_cs_n g1_ras_n g1_ca
 set_false_path -to [get_ports {g2_cs_n g2_ras_n g2_cas_n g2_we_n g2_a10 g1_dq[*] g2_dq[*]}]
 set_false_path -from [get_ports {g1_dq[*] g2_dq[*]}]
 # static levels
-set_false_path -to [get_ports {tie3[*] tie_hold[*] m_c13 m_c15}]
-set_false_path -from [get_ports {m_c13 m_c15}]
+set_false_path -to [get_ports {tie3[*] tie_hold[*] m_c13 m_c15 cand[*] hi_pins[*]}]
+set_false_path -from [get_ports {m_c13 m_c15 cand[*] hi_pins[*]}]
