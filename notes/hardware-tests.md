@@ -44,10 +44,10 @@ intro, both as in Mesen2; the SA-1 test, menu, second load and save RAM still pa
 **The card is prepared** (24 Oct ~08:10): `SYSTEM/CORES/spc.cor` =
 `TESTCORES/19-q-snes_load-v72.cor`: **SA-1 + Super FX** with all the overnight fixes (loader,
 case III, cap_lo) and v7.2's registered ARAM port, **timing met** (clk_mem +0.58 ns). In
-simulation: SA-1 regression PASS; Yoshi's Island to frame 364 with no ARAM read late and its
-frames pixel-identical to v7.0's; Star Fox clean so far (runs were still going). Also on the
-card: `18-q-snes_gsu-c3.cor` (Super FX only, case III + cap_lo, timing met, fully simulated:
-the fallback for Super FX), `16-q-snes_load-v7.cor` / `17-q-snes_gsu.cor` (the same two
+simulation: SA-1 regression PASS; Yoshi's Island (700 frames) and Star Fox (460) PASS with no
+ARAM read late, frames pixel-identical to v7.0's. Also on the
+card: `18-q-snes_gsu-c3.cor` (Super FX only, case III + cap_lo, timing met: the fallback
+for Super FX), `16-q-snes_load-v7.cor` / `17-q-snes_gsu.cor` (the same two
 without the controller fixes; 16 is 0.13 ns short on clk_mem), `14-q-snes_load.cor` = v6.
 (The ~05:00 cores had a loader bug and were replaced.) `SPC/6 Yoshi's Island.spc` and `SPC/7
 Star Fox.spc` are there.
@@ -60,8 +60,8 @@ Star Fox.spc` are there.
    ARAM byte would show as clicks or a stuck/garbled tune). DOWN+SELECT, **7 Star Fox**: intro
    with the 3D Arwings, a bit of the first level. DOWN+SELECT, **2 Kirby Super Star** or **4
    Super Mario RPG** as the SA-1 check.
-3. If the Super FX games misbehave: `tools/sdcore use 18` (Super FX only, the same fixes, the
-   most simulated) and the same two games; then 17/16 (without the controller fixes) to narrow
+3. If the Super FX games misbehave: `tools/sdcore use 18` (Super FX only, the same fixes without
+   v7.2's ARAM register stage) and the same two games; then 17/16 (without the controller fixes) to narrow
    it down. If only the SA-1 games misbehave: 14 (v6) confirms the console side.
 
 ## memtest v3 (15-q-memtest, 23 Oct) results

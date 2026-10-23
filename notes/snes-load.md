@@ -125,8 +125,9 @@ timing. A read still starts at the next k = 0 (decided at k = 4 instead of 2, th
 the k = 3 read completion checks the k = 2 sample itself (`rd_now`, `s_wnew`); write updates
 reach ar_q one clk_sys later (8 clk after the address change, the DSP takes it >= 25 clk on).
 SDC: `s_*` -> the decision registers two cycles. `make sim-sdram-rom8` and the SA-1 regression
-pass; Yoshi's Island to frame 364: no ARAM read waiting, frames pixel-identical to v7.0's; Star
-Fox clean to frame 240 (both runs still going when it became the card's spc.cor, 24 Oct 08:10).
+pass; **Yoshi's Island 700 frames PASS, ARAM 0 late** (v7.0: 26), **Star Fox 460 frames PASS**,
+ARAM 0 late; the frames checked (Yoshi 345-699, Star Fox 300-459) are pixel-identical to v7.0's.
+Card's spc.cor since 24 Oct 08:10.
 
 ### v7 simulation
 
