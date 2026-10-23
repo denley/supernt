@@ -289,6 +289,27 @@ CMUXVG.025.045.2 (C5, 3.07 MHz) as clock outputs; input J18 via `IOINTDQDIN`.
   column walk) and `make sim-memtest` (whole core; models with U4 byte A's DQM on C15 and the
   pair's on C13: the tables attribute both correctly).
 
+## memtest v1 result (23 Oct 2026) and the top-bank constants
+
+On the console (`notes/hardware-tests.md`): U4 byte B clean, byte A and both U5/U16 chips
+silent in all four C13/C15 hypotheses. G1 reads back the last byte the FPGA drove, G2 its
+pull-ups: neither chip ever drives. Three silent chips that behave like DQM high (or CKE low)
+point at pins our cores have never driven: **the top bank's constants**. hwtest v3 switched
+only the 3A/3B constants and held 4A plus K19 K20 J17. `~/scratch/v3/pinclass.py` didn't follow
+memory-controller bypass paths, so it missed most top-bank constants and got J17's level wrong.
+Redone (`i` lines of `build/spc.bt`, top-bank pins without a fabric driver):
+
+| level | pins | evidence |
+|---|---|---|
+| 0, GPIO path | A14 B5 G16 H13 (K19 K20 already held) | DATAOUT unrouted, inverter set (as AB10, confirmed 0 by hwtest v2) |
+| 0, bypass path [likely] | A13 A15 B15 C11 E14 E15 E16 F13 F15 G15 G17 G18 (HMC DQDOUT), A5 (BADOUT), B13 (CKEDOUT), B16 J17 (DMDOUT), J8 (ADDRDOUT) | HMC `IOINT*DOUT` unrouted with its inverter set (`i HMC.011.045:IOINT…DOUT.n 1`), the same pattern as the GPIO zeros. The bypass inverter is real: G2's data FF reaches its pins inverted. The HMC port names are the bypass slot's DDR role, not the board net. |
+| 1, GPIO path | **D9 E10** | OE on, DATAOUT unrouted, no inverter: same as M9/R14 |
+| tri-state | K9 J18 | OE from an unrouted bypass port with no inverter = off |
+
+J17 was held at **1** in hwtest v3–v5 and memtest v1 (pinclass's reading); by the pattern
+above stock drives it 0. memtest v2 drives all of these at the levels in the table and
+binary-codes which ones matter for each chip.
+
 ## Constant pins: AB10 and the open-drain group (after hwtest v1, Oct 2026)
 
 hwtest v1 on the console (22 Oct, `notes/hardware-tests.md`): all eight capture points wrong on

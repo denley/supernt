@@ -35,6 +35,20 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## memtest v1 (15-q-memtest, 23 Oct) results
+
+Run 23 Oct ~21:15 (`~/scratch/cap/rec-20261023-211505.mkv`, 27 rounds; screens
+`photos/memtest-v1-p1-2026-10-23.jpg`, `-p2-`):
+- U4 byte B: 000000 at f3.5 and r4 in all four hypotheses (control as expected).
+- U4 byte A: ~7F8000 everywhere (no answer), C13/C15 low or released alike.
+- U5/U16: no answer in any hypothesis. G2 (open drain, pull-ups) reads FF throughout
+  (0FF0000 errors = every byte); G1 reads one constant byte per pass at every edge, which is
+  the last byte the FPGA drove (the column walk's last entry, A5, is its only "correct" one):
+  a floating bus holding its charge. Column walk: everything wrong.
+- So neither chip of the pair drives its outputs, like U4's byte A. C13/C15 aren't the
+  enable. Next: the top-bank constant pins no core has driven yet (`notes/sdram.md`,
+  "memtest v1 result").
+
 ## Next session: memtest v1 (prepared 23 Oct)
 
 Tests all three SDRAM chips with the revised map (`notes/sdram.md`, "Which chip is which",
