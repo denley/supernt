@@ -35,7 +35,28 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
-## Next session: the save probe (prepared 24 Oct)
+## Save probe (19-q-snes_load-v72, 24 Oct ~09:55) results: no save handling
+
+Recording `~/scratch/cap/rec-20261024-095404.mkv` (frames `~/scratch/cap/probe/`, 1 fps). The
+SPC browser's START → SYSTEM → MENU OPTIONS has no PROMPT WHEN SAVING RAM (only Skin, Highlight
+style/colour, Font, Menu bounce, Dim game in menu), so the prompt stayed off. Denley loaded
+`8 SAVE PROBE`, pressed DOWN+SELECT, loaded it again and paged the log. **The PIC gave the file
+no save handling at all:**
+- `SAVES/SNES/8 SAVE PROBE.sav` unchanged (byte-identical), no new file anywhere on the card.
+- Status page after the second load: FILE bytes 0x18200 = the file, end 0x18200, lost 0, INFO
+  CRC OK, loads 02: nothing beyond the file arrived in the file range.
+- **reads 0x7805 = status rd 0x35 + pad rd 0x77D0 exactly**: the PIC read nothing else from the
+  core all session, so it never read save RAM back.
+- All 0x3F log entries after the first file: the usual post-file writes (`0x1000_D129`,
+  `0x0000_00FE` = 06, `0x1000_0102`, `0x1000_0010`, `0x1000_0021` = F8), pad reads, the wake on
+  SELECT (0x04 at T 0x2A3AC), the browser redraw (`0x1000_D1xx`, 0x1000 screen bytes at
+  `0x1018_0000`), RUN, the second file, the same post-file writes. No write run near 32 KB,
+  nothing with D0 53.
+
+So the planted headers changed nothing: the JB's save code belongs to its own ROM loader, and SD
+saves are out of reach from the SPC player's slot.
+
+## Next session: the save probe (prepared 24 Oct; done, results above)
 
 Question: does the PIC give an SPC file the JB's save handling (`/SAVES/SNES/*.sav`) when the
 file looks like a ROM with save RAM? (`notes/snes-load.md`, "Saves to the SD card: the

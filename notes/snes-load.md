@@ -433,7 +433,7 @@ not a file we can replace. Every other way to the card considered (the FPGA driv
 card, the PIC's own flash, SDRAM surviving a reconfiguration into the main core, a cartridge's
 SRAM + CopySNES) is either impossible or unsafe.
 
-### Saves to the SD card: the probe (prepared 24 Oct, not yet run)
+### Saves to the SD card: the probe (24 Oct: negative)
 
 The one way left to the stock behaviour: the JB decides save RAM for a ROM from its SNES
 header, and its "playing" mode after an SPC file looks like its game mode (the browser comes
@@ -454,9 +454,11 @@ if it lands at 0xFF00 and above), a save write as a read run after DOWN+SELECT, 
 the `.sav` on the card changes. Test plan: notes/hardware-tests.md, "Next session: the save
 probe".
 
-If the PIC takes it: v8 answers the PIC's save reads from BW-RAM and takes its save writes into
-BW-RAM, and `rom2spc.py` plants each game's real RAM size. If not, SD saves stay impossible from
-our core, and the in-RAM saves above are what there is.
+**Console result (24 Oct, notes/hardware-tests.md "Save probe"): no save handling.** The
+`.sav` stayed untouched, nothing but the file arrived, and the PIC's reads were exactly its
+status and pad reads, nothing else. The SPC player's MENU OPTIONS doesn't even have the JB's
+PROMPT WHEN SAVING RAM. SD saves are out of reach from our core; the in-RAM saves above are
+what there is.
 
 ## SDRAM ARAM port (v2, `sdram_rom8.sv`)
 
