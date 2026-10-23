@@ -468,4 +468,5 @@ chord file was run (results below); the link part showed why nothing else could 
     DOWN+SELECT hidden (notes/snes-load.md, "v4").
 - 23 Oct 2026, snes_load **v4 built** (not yet run): port 2 on D6 directly, a PIC woken without
   DOWN+SELECT stays hidden behind the game; timing met (+0.542 ns), 87 user I/Os. Test:
-  notes/snes-load.md, "Console test (v4)".
+  notes/snes-load.md, "Console test (v4)". Installed on the card as `14-q-snes_load` (and
+  spc.cor); v2 and v3 kept as `TESTCORES/90-q-snes_load-v2.cor`, `91-q-snes_load-v3.cor`.
