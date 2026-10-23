@@ -412,8 +412,11 @@ cone of each output pin, `allpins.py`, `h15*.py` = the link-domain cycle model o
   logging them, and a repeated read of the same registers leaves the address register where
   the previous one left it (`0x2001_0003`), which looked like silence. That also explains v1
   (registers 0 outside its browser view: no wake), v2/v3 (always passed through: SELECT alone
-  woke it, with either poll waveform). snes_load v5 passes the pad to it during a game only
-  while DOWN+SELECT is held (notes/snes-load.md, "v5 in short").
+  woke it, with either poll waveform). snes_load v5 passed the pad to it during a game only
+  while DOWN+SELECT was held, and that never woke it: 0x2000 = 0x24 read 279 times (v5 run).
+  **It wakes on SELECT alone (0x2000 = 0x04)** [likely: v2/v3 SELECT alone woke it, and DOWN+SELECT
+  did there only because letting go of DOWN first leaves SELECT alone]. snes_load v6 sends it a
+  300 ms SELECT-alone press when DOWN+SELECT is pressed (notes/snes-load.md, "v6 in short").
 - Fallbacks if DOWN+SELECT doesn't wake it: the console's RESET button (read by the PIC), and
   the ID666 song length (a 20 s file: whatever the player does when a song ends shows up in
   v2's log). See notes/snes-load.md, "Console test (v2)".

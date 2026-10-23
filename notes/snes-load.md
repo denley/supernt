@@ -15,10 +15,21 @@ browser). v3 (one console run, 23 Oct) found port 2's data pin (D6: **player 2 w
 SELECT fix didn't work. v4 (console run 23 Oct) read D6 directly; SELECT alone no longer opened
 the browser, but neither did DOWN+SELECT, and its log showed why: **while a game runs the PIC
 reads the pad registers over the link** (0x2000/0x2001 every ~33 ms) and wakes on SELECT there;
-it doesn't watch the controller lines. v5 (this version, "v5 in short") uses that; the test is
-"Console test (v5)".
+it doesn't watch the controller lines. v5 (console run 23 Oct) passed DOWN+SELECT through to it
+during games: nothing woke it (its log: 0x2000 read as 0x24 279 times). v6 (this version, "v6
+in short") sends it SELECT alone instead; the test is "Console test (v6)".
 
-## v5 in short (23 Oct 2026)
+## v6 in short (23 Oct 2026)
+
+- The PIC wakes on **SELECT alone** in 0x2000 (0x04), not on DOWN+SELECT (0x24): in v2/v3 it saw
+  SELECT alone, or SELECT left alone as DOWN was let go first; v5 showed it only 0x24 and then
+  0. So on a DOWN+SELECT press during a game (PIC asleep) the core shows the PIC a clean SELECT
+  press of its own: 0x2000 = 0x04 for 300 ms (`SEL_PULSE_MS`), then 0, whatever is held. The
+  PIC wakes, the core shows it (as v5) and gives it the real buttons once all are released. If
+  the PIC is already awake behind the game, DOWN+SELECT just shows it (no pulse: SELECT there
+  would be its BACK TO GAME).
+
+## v5 in short (23 Oct 2026, superseded by v6)
 
 - During a game the pad registers read 0 **except while DOWN+SELECT is held**: the PIC sees
   DOWN+SELECT and wakes, SELECT alone and L+R+SELECT (our pages) never reach it. The keys' menu
@@ -381,6 +392,14 @@ v4: 87 user I/Os: v2's 86 + `pad_d6` (port 2 data, input, weak pull-up as in v3)
 
 ## Simulation
 
+**v6 (23 Oct).** `make sim-snes-load`: **PASS**. The PIC stand-in wakes only on 0x2000 = 0x04
+(SELECT alone), as the v5 run showed, and the test now requires exactly one wake. DOWN+SELECT at
++380 ms: the core's SELECT pulse woke it at +417, nothing before (keys' menu view, pages,
+SELECT alone: 0 wakes), second file loaded and booted, SA-1 tests pass. The first v6 build of
+the pulse ran its full 300 ms even after the PIC woke: the PIC, back in "playing" after the
+second file, read SELECT again and woke over the new game (+661 ms); now the pulse ends as soon
+as the PIC is active. `TB_DEBUG=1` prints every non-zero 0x2000 the playing PIC reads.
+
 **v5 (23 Oct).** `make sim-snes-load`: **PASS**. The PIC stand-in now does what the v4 console log
 showed: while "playing" it reads 0x2000/0x2001 every 33 ms and wakes when 0x2000 has SELECT (the
 v4 model watched the lines instead, which is why v4's sim passed and the console didn't). The
@@ -495,6 +514,9 @@ sets up the HDMI transmitter), and not again at the boot.
 
 ## Build results
 
+**v6 (23 Oct 2026):** seed 2 (`.cor` sha1 bfac4b68ce3b…), **timing met** (worst setup +0.509 ns, hold
++0.103 ns; seed 3: -0.018), 87 user I/Os, pin check passes.
+
 **v5 (23 Oct 2026):** seed 2 (`.cor` sha1 12ccded2c274…): 14,733 / 18,480 ALMs (80 %), 299 / 308
 RAM blocks, **timing met** (worst setup +0.457 ns, hold +0.090 ns), 87 user I/Os. Seed 1 missed
 by 0.45 ns (seed 3: +0.212). The 107 MHz SDRAM controller's slack swings by about ±0.5 ns from
@@ -540,7 +562,12 @@ SDC), then the log's 8-entry compare and the ARAM forward counter by 0.5 ns (reg
   frequency and phase are merged, and the SDC's `*[2].*` clock name then matches nothing (all
   SDRAM I/O constraints silently dropped; warning 332174) — hence the 1-step SDRAM clock lead.
 
-## Console test (v5): one run
+## Console test (v6): one run
+
+As v4's below. If the browser doesn't come up on DOWN+SELECT, open the status page (L+R+SELECT)
+and leave it up for a few seconds: its two newest log rows show what the PIC read last.
+
+## Console test (v5): one run (done 23 Oct: DOWN+SELECT didn't wake the PIC)
 
 As v4's below (v4 ran on 23 Oct: SELECT alone stayed with the game, but DOWN+SELECT didn't open
 the browser either; notes/hardware-tests.md).

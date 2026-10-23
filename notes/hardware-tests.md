@@ -480,3 +480,11 @@ chord file was run (results below); the link part showed why nothing else could 
 - 23 Oct 2026, snes_load **v5 built** (seed 2, timing met +0.457 ns): pad registers pass
   DOWN+SELECT during games (else 0). Installed on the card as `14-q-snes_load`; v4 kept as
   `TESTCORES/92-q-snes_load-v4.cor`.
+- 23 Oct 2026, `14-q-snes_load` **v5** on the console (recording
+  `~/scratch/cap/rec-20261023-184457.mkv`, test at ~5790-5900 s): SELECT alone stayed with the
+  game, but **DOWN+SELECT still didn't open the browser**. Status page (T 0x16E98): newest log
+  row `20000000 0002 24 0117` from T 0xCE7C to 0x142F3: the PIC read DOWN+SELECT (0x24) 279
+  times over ~9 s of holds and never woke (UI loop last at 0x21D8, before the boot). So it wakes
+  on SELECT alone (0x04), not on any value with SELECT in it. v6 sends it that.
+- 23 Oct 2026, snes_load **v6 built** (seed 2, timing met +0.509 ns): a 300 ms SELECT-alone press
+  for the PIC on DOWN+SELECT during games.

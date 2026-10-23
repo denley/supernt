@@ -20,8 +20,11 @@
 // v4: port 2 (data on D6, found by v3's pin scan; LATCH and CLOCK shared with port 1), a second
 // virtual 4021 for the SNES.
 // v5: the menu combination. While a game runs the PIC reads the pad registers (0x2000/0x2001,
-// every ~33 ms; v4 console log) and wakes on SELECT, so during a game the registers read 0
-// except while DOWN+SELECT is held: SELECT alone (and L+R+SELECT for our pages) stays the game's.
+// every ~33 ms; v4 console log) and wakes on SELECT alone (v6: v5 showed it DOWN+SELECT, 0x24,
+// for 9 s and it never woke; v2/v3 woke on SELECT alone, or SELECT left alone as DOWN was let
+// go). So during a game the registers read 0, and when DOWN+SELECT is pressed the PIC is shown a
+// clean SELECT press of its own (SELECT alone for SEL_PULSE_MS, then nothing): SELECT alone
+// (and L+R+SELECT for our pages) stays the game's.
 // A PIC that wakes while DOWN+SELECT is (or was within 1.5 s) held is shown at once; one that
 // wakes otherwise (none should) stays hidden behind the game with 0s until DOWN+SELECT. Whenever
 // the PIC's screen comes up during a game it gets 0s until all buttons are released (a SELECT
@@ -62,7 +65,8 @@ module top #(
     parameter integer MENU_MS = 1000,       // L+R+SELECT+START
     parameter integer FOLLOW_MS = 600,      // the PIC counts as active this long after a UI write
     parameter integer INIT_CYCLES = 21450,
-    parameter integer WAKE_MS = 1500        // a PIC waking this long after DOWN+SELECT is shown
+    parameter integer WAKE_MS = 1500,       // a PIC waking this long after DOWN+SELECT is shown
+    parameter integer SEL_PULSE_MS = 300    // v6: the SELECT press the PIC sees for DOWN+SELECT
 ) (
     input  wire       clk,      // W16, 74.25 MHz
     output wire       pclk,     // M22
@@ -122,10 +126,11 @@ module top #(
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [12:0] pad_m1 = 13'd0, pad_m2 = 13'd0;      // {pad_std, buttons} on clk_mem
     reg        pic_pad_v = 1'b1;                     // clk_vid: PIC gets the pad
+    reg [11:0] pic_btn = 12'd0;                      // clk_vid: the buttons it gets
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [1:0]  pic_pad_m = 2'b00;
     always @(posedge clk_mem) begin
-        pad_m1 <= {pad_std, pad_raw[11:0]};
+        pad_m1 <= {pad_std, pic_btn};
         pad_m2 <= pad_m1;
         pic_pad_m <= {pic_pad_m[0], pic_pad_v};
     end
@@ -408,16 +413,27 @@ module top #(
     wire [1:0] mode /* verilator public_flat_rd */ = diag_v == 2'd2 ? 2'd3 :
                       forced || diag_v == 2'd1 || (st_v == S_FAIL && !menu_t) ? 2'd2 :
                       menu_up ? 2'd1 : 2'd0;
-    // v5: during a game the PIC gets buttons while DOWN+SELECT is held (to wake it) and while its
-    // screen is shown (follow_on; not the keys' menu view), there only once all buttons held when
-    // it came up are released
-    reg follow_d = 1'b0, rel_wait = 1'b0;
+    // during a game the PIC gets its SELECT pulse (v6) after a DOWN+SELECT press, and the real
+    // buttons while its screen is shown (follow_on; not the keys' menu view), there only once all
+    // buttons held when it came up are released
+    reg follow_d = 1'b0, rel_wait = 1'b0, dsel_d = 1'b0;
+    reg [8:0] sel_pulse /* verilator public_flat_rd */ = 9'd0;   // ms of SELECT for the PIC left
     always @(posedge clk_vid) begin
         follow_d <= follow_on;
         if (st_v == S_RUN && follow_on && !follow_d) rel_wait <= 1'b1;
         else if (btn == 12'd0) rel_wait <= 1'b0;
-        pic_pad_v  <= st_v == S_RUN ? (follow_on ? !rel_wait : dsel_now) :
+        pic_pad_v  <= st_v == S_RUN ? (follow_on ? !rel_wait && follow_d : sel_pulse != 9'd0) :
                       !opt_gate || (menu_up && !forced) || st_v == S_IDLE || st_v == S_NOTROM;
+        pic_btn    <= st_v == S_RUN && !follow_on ? B_SEL : pad_raw[11:0];
+        // v6: a DOWN+SELECT press starts the PIC's SELECT pulse (once per press; not when the PIC
+        // is already awake behind the game: there SELECT would be BACK TO GAME, and DOWN+SELECT
+        // just shows it, pic_shown)
+        dsel_d <= dsel_now;
+        // (it ends as soon as the PIC wakes: a pulse left over after the next file would wake it
+        // again over the new game)
+        if (st_v != S_RUN || pic_act_v[1]) sel_pulse <= 9'd0;
+        else if (dsel_now && !dsel_d) sel_pulse <= SEL_PULSE_MS[8:0];
+        else if (ms_tick && sel_pulse != 9'd0) sel_pulse <= sel_pulse - 9'd1;
         snes_pad_v <= st_v == S_RUN && !menu_up;
         accept_v   <= menu_up && st_v == S_RUN;
     end

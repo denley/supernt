@@ -21,14 +21,15 @@
 //              0x1018_0F6C, 0x1000_D129 = 00, 0x0000_00FE = 06, 0x1000_0102 = 00, 0x1000_0010 =
 //              00, 20 ms later 0x1000_0021 = F8, one more UI loop, then nothing on the link;
 //   playing    as the console's PIC (v4 run's log): it reads the pad registers 0x2000 and 0x2001
-//              (2 bytes each) every 33 ms and wakes when 0x2000 has SELECT: it redraws its
+//              (2 bytes each) every 33 ms and wakes when 0x2000 is SELECT alone (v5 run: 0x24,
+//              DOWN+SELECT, for 9 s didn't wake it; v2/v3: SELECT alone did): it redraws its
 //              browser screen and runs the UI loop again. In its browser after a game, SELECT
 //              (a new press) is BACK TO GAME: playing again.
 // The "user" (pad), times after the first boot: L+R+SELECT+START at +40 and +120 ms (menu view
 // by the keys on, off), L+R+SELECT at +200, +260, +320 (status page, log view, off), SELECT
 // alone at +362 (the game gets it): none of these may wake the PIC (its pad registers read 0
-// in the game); DOWN+SELECT at +380 (the PIC sees it and wakes, the core shows its screen and
-// gives it the pad only after the release), DOWN at +480 (the second file), Y at +530: the
+// in the game); DOWN+SELECT at +380 (the core sends the PIC a 300 ms SELECT-alone press, the PIC
+// wakes, the core shows its screen and gives it the pad only after the release), DOWN at +480 (the second file), Y at +530: the
 // second file (TB_FILE2, default the same ROM under another name: save RAM kept) is loaded and
 // booted; the SA-1 tests must pass again.
 // Port 2 (v4): a second 4021 pad on pad_d6 (LATCH/CLOCK shared); A held at +250-290 ms after the
@@ -198,6 +199,7 @@ int main(int argc, char **argv) {
     double now_ns = 0;
     int polls = 0, poll_ok_at = -1, ui_loops = 0, ui_after_boot = 0, presses_down = 0, runs = 0;
     int pad_nonzero_in_game = 0, pad_reads_in_game = 0, pad_to_hidden = 0, wakes_hidden = 0, backs = 0;
+    int wakes_total = 0;
     double t_file0 = -1, t_file1 = -1;
     uint8_t s0b = 0, s1b = 0, pad_prev = 0, pad_now = 0;
     bool sending = false, sent = false, booted = false, resent = false;
@@ -262,6 +264,7 @@ int main(int argc, char **argv) {
     auto wake = [&]() {                     // SELECT seen on the controller lines
         playing = false; woke = true; sent = false; woke_at = now_ns / 1e6;
         if (booted && woke_at < t_boot1 + 380) wakes_hidden++;
+        if (booted) wakes_total++;
         skip_edge = true;                   // buttons held while it wakes aren't new presses
         send_screen();
         pic.call(ui_loop);
@@ -272,7 +275,9 @@ int main(int argc, char **argv) {
         pic.read(0x20010000, 2, [&](uint8_t v) { (void)v; });
         pic.call([&]() {
             if (!playing) return;
-            if (play_pad & 0x04) { wake(); return; }
+            if (getenv("TB_DEBUG") && booted && play_pad)
+                printf("PIC playing: +%.1f ms 0x2000 = %02X\n", now_ns / 1e6 - t_boot1, play_pad);
+            if (play_pad == 0x04) { wake(); return; }   // SELECT alone (v5 run: 0x24 didn't)
             pic.wait(33e6);
             pic.call(play_loop);
         });
@@ -554,10 +559,10 @@ int main(int argc, char **argv) {
         ok_menu = seen_menu_keys && seen_status && seen_log && woke && seen_follow && sent2 && booted2 &&
                   r->tb__DOT__dut__DOT__ram_keep == (fname2 == fname) && r->tb__DOT__dut__DOT__n_log > 0 &&
                   sel_in_game && wakes_hidden == 0 && backs == 0 && menu_while_hidden == 0 &&
-                  pad_to_hidden == 0 && woke_at >= t_boot1 + 380;
-        printf("menu combination: PIC woke at +%.1f ms (DOWN+SELECT from +380), wakes before it %d"
-               " (must be 0), BACK TO GAME %d (must be 0), PIC screen without the keys before it %d"
-               " (must be 0), game got SELECT alone %s\n", woke_at - t_boot1, wakes_hidden, backs,
+                  pad_to_hidden == 0 && woke_at >= t_boot1 + 380 && wakes_total == 1;
+        printf("menu combination: PIC woke at +%.1f ms (DOWN+SELECT from +380), wakes in all %d (must be 1),"
+               " wakes before it %d (must be 0), BACK TO GAME %d (must be 0), PIC screen without the keys before it %d"
+               " (must be 0), game got SELECT alone %s\n", woke_at - t_boot1, wakes_total, wakes_hidden, backs,
                menu_while_hidden, sel_in_game ? "yes" : "NO");
         printf("menu scenario: menu view by keys %s, status page %s, log view %s, PIC woke on DOWN+SELECT %s,"
                " core followed it %s, second file %s, second boot %s (frame %d), save RAM %s\n",
