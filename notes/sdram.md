@@ -335,6 +335,21 @@ Console run 23 Oct ~22:00 (`~/scratch/cap/rec-20261023-215859.mkv`, 8 rounds; sc
   x8 chip with its own command pins, data pins and (mostly constant) address pins, enabled by
   B13 low.
 
+## memtest v3 (prepared 23 Oct 2026)
+
+- All candidates at spc.cor's levels, no hypotheses; the screen shows the last four passes.
+- `mem2_test.sv` compares at f2.5 r3 f3.5 r4 f4.5 r5 (v2: G1's data at r3).
+- **G2 address probe** after the column walk, G1 deselected: for each of 22 pins (A14 B5 G16
+  H13 A13 A15 B15 C11 E14 E15 E16 F13 F15 G15 G17 G18 A5 B16 J17 C13 C15, and D17), base =
+  all of them low: write X0 to base; write Xa with the pin released (pulled high) during ACT
+  only; read base (b1); write Xw with the pin high during WRITE only; read base (b2). Not an
+  address pin: b1 = Xa, b2 = Xw. Row-only bit (A10, A11): b1 = X0, b2 = Xw. A0-A9 or bank:
+  b1 = b2 = X0 (a bank pin high opens or addresses another bank, so the write misses base).
+  Each pin change waits 4 µs for the pull-up; the probe takes ~0.4 ms per pass.
+- Simulated (`make sim-mem2`, `make sim-memtest`) with x8 models at CL 2 (one clock earlier,
+  as on the console) and G2's address on 13 of the candidates: G1 clean at f2.5/r3, and every
+  probe class comes out right; a 6 µs pull-up rise makes the probe fail.
+
 ## Constant pins: AB10 and the open-drain group (after hwtest v1, Oct 2026)
 
 hwtest v1 on the console (22 Oct, `notes/hardware-tests.md`): all eight capture points wrong on

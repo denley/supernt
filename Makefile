@@ -160,13 +160,13 @@ build/memtest/screen.hex: quartus/memtest/screen.txt tools/mkscreen.py
 	mkdir -p build/memtest
 	python3 -I tools/mkscreen.py $< $@
 
-# Unit simulation of quartus/common/mem2_test.sv (quartus/memtest/sim/tb_mem2.sv): normal, a
-# pull-up slower than the wait (group 2 must fail), a stuck column pin (column walk must see it).
+# Unit simulation of quartus/common/mem2_test.sv (quartus/memtest/sim/tb_mem2.sv): normal (G1
+# clean, G2's address probe classified), and a pull-up slower than the wait (probe must fail).
 MEM2_SIM = quartus/memtest/sim/tb_mem2.sv quartus/memtest/sim/x8_model.v quartus/hwtest/sim/models.v \
   quartus/common/mem2_test.sv
 sim-mem2: $(MEM2_SIM)
 	mkdir -p build/sim
-	set -e; for v in "" "-P tb_mem2.T_RISE=6000.0 -P tb_mem2.EXPECT_G2_FAIL=1" "-P tb_mem2.G2_STUCK=5"; do \
+	set -e; for v in "" "-P tb_mem2.T_RISE=6000.0 -P tb_mem2.EXPECT_SLOW=1"; do \
 	  iverilog -g2012 -s tb_mem2 $$v -o build/sim/mem2.vvp $(MEM2_SIM); \
 	  vvp -n build/sim/mem2.vvp | tee build/sim/mem2.log | grep -v finish; grep -q '^PASS' build/sim/mem2.log; done
 

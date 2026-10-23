@@ -78,7 +78,10 @@ Card" loader, BIOS files are on the card in `/BIOS`).
    `tools/sdcore use NN` / `tools/sdcore roms`; `sync; sudo umount /mnt/sd`.
 2. Start `tools/capview.py` (HDMI capture dongle MS2109 on homebox: records
    `~/scratch/cap/rec-*.mkv` with sound, live view http://homebox.jaguar-munsell.ts.net:8765/
-   for Denley's phone; it fetches frame by frame and survives app switches without a reload). Stop it with `pkill -INT -f "^python3 tools/capview.py"` (a plainer
+   for Denley's phone; it fetches frame by frame and survives app switches without a reload).
+   If the live view says "no signal" while the console shows a picture, check `pgrep -a
+   ffmpeg`: a phone disconnecting can kill capview's ffmpeg without a restart (23 Oct);
+   restart capview. Stop it with `pkill -INT -f "^python3 tools/capview.py"` (a plainer
    pattern kills your own shell).
 3. Denley: card in the console, Tools → Play SPC Files, then whatever the test needs. Read
    results from the recording (`tools/frames.sh`, ImageMagick crops); design test cores so one

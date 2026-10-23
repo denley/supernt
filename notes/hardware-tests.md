@@ -35,6 +35,19 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session: memtest v3 (prepared 23 Oct)
+
+Everything at spc.cor's levels (J8, B13 and the other top-bank constants low, D9/E10 high,
+C13/C15 low); capture points moved one clock earlier (f2.5-r5) for G1; a probe that releases
+each of G2's 22 candidate address pins in turn (`notes/sdram.md`, "memtest v3"). Same
+procedure as v1/v2 (slot 15); ~30 s is enough (each pass ~1 s, two pages of 8 s). Reading it:
+- Page 1: U4 B clean as always; **G1 0000000 at r3 (and probably f2.5)** in all four passes
+  = G1 works; column walk G1 000 at r3. G2 main-test errors are expected (its address pins
+  are held constant).
+- Page 2 (probe): for each pin, b1/b2 at r3 against X0/Xa/Xw: b1 = b2 = X0 → G2 address/bank
+  pin; b1 = X0, b2 = Xw → row-only bit; b1 = Xa, b2 = Xw → not an address pin. FF everywhere
+  = G2 not driving (B13 not enough after all).
+
 ## memtest v2 (15-q-memtest, 23 Oct) results
 
 Run 23 Oct ~22:00 (`~/scratch/cap/rec-20261023-215859.mkv`; the first attempt showed "no
