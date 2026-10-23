@@ -260,7 +260,9 @@ The pin facts below come from `notes/spc-core.md` and `notes/hardware-research.m
   - Video at 720p would use 74.25 MHz directly. Matching 60.0988 Hz SNES frames to 60 Hz HDMI needs
     either a frame buffer (SDRAM) or a slightly retuned SNES master clock (21.477 × 60/60.0988 ≈
     21.442 MHz). spc's runtime-retuned PLL suggests Analogue does something like the latter.
-- **SDRAM.** There are two independent buses:
+- **SDRAM.** There are two independent buses (Changed, 23 Oct: chip roles below were swapped;
+  the bottom bus is the x16 U4, the top-bank bus the x8 pair; `notes/sdram.md`, "Which chip is
+  which"):
   - **x16 AS4C8M16SA (16 MB)**: top bank, clock out on H8. This bus can run `sdram.sv` as is (port 0
     ROM, port 1 BSRAM; 13-bit address, 2 banks, DQML/H). SA-1 ROMs are ≤ 4 MB.
   - **x8 pair IS42S81600F (2 × 16 MB)**: banks 2A/3B, clock AB11. The two DQ bytes have separate

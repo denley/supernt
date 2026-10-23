@@ -53,20 +53,22 @@ Card" loader, BIOS files are on the card in `/BIOS`).
   must read 02; PIC UI loop reads the pad at `0x2000/0x2001`; its screen is a 64×32 2-byte-cell
   text map at `0x1018_0000`; **a run file arrives verbatim at link address `0x0000_FF00` + file
   offset** (1 MB in ~0.6 s); after a file the PIC goes silent until DOWN+SELECT.
-- SDRAM (`notes/sdram.md`): of the x8 pair only **chip B** responds (8-bit, 8 MB used,
-  512-column pages, AB10 = its DQM, held low). **Chip A never drives** in any of 16 pin
-  hypotheses: probably a missing enable signal, not a dead chip (the stock core uses both).
-  The board's third chip (x16 AS4C8M16SA on the top bank, 148.5 MHz controller in the stock
-  core) is not brought up yet.
+- SDRAM (`notes/sdram.md`, "Which chip is which", revised 23 Oct): the bottom-bank bus (AB11
+  clock) is the **x16 AS4C8M16SA (U4)**, not the x8 pair: its 512-column page gives it away.
+  "Chip B" = its byte on 3B (works, 8 MB used, AB10 = that byte's DQM, held low); "chip A" =
+  its other byte on 2A, masked by U4's second DQM, which we don't drive yet (not any constant
+  pin; best candidate C13/C15). The top-bank controller (148.5 MHz, H8 clock) is the **x8 pair
+  U5 + U16 (2 × 16 MB)** and is now fully decoded: shared A0–A11/BA/clock, separate
+  CS#/RAS#/CAS#/WE#/A10 and 8 data pins per chip, CL3 (`notes/sdram.md`, "Controller 2").
 
 ## Next steps (agreed direction)
 
 1. **Super FX 1/2** (Star Fox, Yoshi's Island, both on the card): the vendor core has the GSU;
    the work is memory. M10K is full (299/308: WRAM/VRAM live in block RAM), logic at 79 %, and
    GSU games need 32–64 KB RAM plus fast ROM/RAM access that one 8-bit chip may not give.
-   Plan: a test core that brings up the **x16 SDRAM** (pin map partly decoded in
-   `notes/sdram.md`, second controller) and retries **chip A's** enable from a deeper decode,
-   in one console run; then move WRAM/GSU RAM there and add the GSU. Estimate: 3–5 console runs.
+   Plan: a test core (one console run) that brings up **U5 + U16** with the decoded pin map
+   and tests U4 with chip A's DQM candidates (C13/C15 low vs released) in the same run; then
+   move WRAM/GSU RAM there and add the GSU. Estimate: 3–5 console runs.
 2. Optional: DSP-1 in our core (small; vendor `DSPn`), larger ROMs, more games.
 3. Not possible (decoded): saves to SD from the SPC player context.
 

@@ -7,7 +7,41 @@ the fixed tool (nothing forced); changes marked "Changed". Confidence tags: **[c
 or forced by the simulated command sequence; **[likely]** = the only reading consistent with several
 independent checks; **[guess]** = plausible, not checked.
 
+## Which chip is which (revised 23 Oct 2026)
+
+The sections below were written assuming the bottom-bank bus ("controller 1", AB11 clock) drives
+the two x8 IS42S81600F, with "chip A" (DQ on 2A) and "chip B" (DQ on 3B) as the two chips. Two
+independent results say that's wrong:
+
+1. **Chip B's page has 512 columns** (hwtest v2). The IS42S81600F (16M × 8) has 4096 rows ×
+   **1024** columns per bank; the **AS4C8M16SA** (8M × 16) has 4096 × **512**. So the
+   bottom-bank bus is the x16 chip **U4**, 16 MB.
+2. **The 148.5 MHz controller ("controller 2", H8 clock) decodes as two x8 chips with 1024
+   columns** on a shared address bus with separate command and data lines ("Controller 2"
+   below). That's the IS42S81600F pair, **U5 + U16**, 2 × 16 MB.
+
+The pin positions agree. On the photo (`notes/hardware-research.md`) U5 sits by the FPGA's upper
+left edge and U4 by its lower left edge (ball A1 top left); controller 2's pins are all in the
+top-left quarter of the ball grid, controller 1's address pins on the lower left edge and its 3B
+data pins on the bottom edge.
+
+Consequences:
+- **"Chip A" and "chip B" are the two bytes of U4**, not two chips. Chip B = the byte on 3B with
+  AB10 as its DQM. Chip A = the byte on 2A, masked by **U4's other DQM**, which the stock core
+  must drive low somewhere and our cores don't. It isn't one of the 3A/3B constants, Y3 or the
+  4A/7A constants (hwtest v3). It isn't any controller-1 pin either. The candidates left are pins
+  stock drives from logic that hwtest leaves as weak pull-up inputs. The best of these is
+  **C13/C15** (one FF in controller 2, 0 except during controller 2's MRS). TSOP-54 x16: LDQM is
+  pin 15 (between DQ7 and WE#), UDQM pin 39 (next to CLK). AB10 sits in the same IOE pair as
+  the clock AB11, so it is probably UDQM, which would make chip B DQ8–15 [guess].
+- **U5 + U16 (32 MB) are accessible**: controller 2's pin map is complete apart from the A0–A9
+  bit order (not needed) and C13/C15. Each chip is an 8-bit memory with its own command lines,
+  so they can run as one x16 memory (same command to both) or as two independent banks.
+- Total: 16 MB (U4, 8 MB usable until chip A's DQM is found) + 32 MB (U5/U16), as the photos said.
+
 ## Summary
+
+(Written before the revision above: "x8 pair" / "chip A/B" here = U4 and its two bytes.)
 
 - The two x8 IS42S81600F chips are **one x16 memory**: all address/command lines are shared, the two
   8-bit DQ buses are driven and captured on the same cycles [confirmed]. Chip "A" on bank 2A, chip
@@ -164,34 +198,69 @@ set; client S: two inputs of its toggle handshake set): same command sequences a
 
 Timing in C1 cycles (8.631 ns): tRP 3, tRCD 3, CL 3, tRAS ≈ 522 cycles (4.5 µs), tRC for refresh 9.
 
-## Top bank / x16 AS4C8M16SA
+## Controller 2: the IS42S81600F pair, U5 + U16 (decoded 23 Oct 2026)
 
 Top-bank pins driven through HMC bypass ports whose route line has no matching `i HMC …` inverter
 line (`r X HMC.011.045:IOINT…DOUT.n ; PIN`) were missed by `pinmap.py`. Changed: fixed,
-`build/spc-pinmap.txt` now lists all of the pins below (15 more fabric-driven top-bank pins; it
-takes the bypass table from `tools/cvinfo hmc`). Following those routes, fabric drives many
-top-bank pins, not just defaults:
+`build/spc-pinmap.txt` now lists all of them (it takes the bypass table from `tools/cvinfo hmc`).
 
-- **Second memory controller, 148.5 MHz** (FPLL.054.000 C5 via CMUXVG.021.000.3; LABs x=19–21,
-  y=20–24), with its clock out on **H8** (DDIO like AB11, IOE `CLKOUT.0` ← CMUXVG.021.000.2 =
-  FPLL.054.000 C8, same PRESET 5 / PH_MUX 7 → −2.04 ns). That clock is why the earlier notes took H8
-  for the x16 SDRAM clock. M22's HDMI pixel clock comes from FPLL.000.037 C1, not from this PLL.
-  - 8-bit bidirectional bus with one shared OE FF (`LAB.020.021.0:FFB0`): N8 (3B), J7 J9 K7 (8A),
-    H11 G12 F12 J11 (7A).
-  - 17 outputs: N6 P6 M6 P7 R7 P8 R9 (3A/3B, plain GPIO) and H6 F7 E9 D7 C8 C9 H9 D12 E12 D13 (via
-    HMC bypass). By ball position these all sit in one block (rows C–R, columns 6–13), which fits
-    one TSOP. 10 of them are 4-way muxes of address-like registers, E9/C9 are a pair like AA15/AB15
-    (bank?), H9 D12 E12 D13 are pure FSM outputs (command lines), and M6 is a sticky flag.
-  - Simulated: idles 2^16 cycles (441 µs), then a short command sequence with two commands 17
-    cycles apart, an all-zero step with N6 and R7 high (mode register?), and then a 2-command block
-    every **1092 cycles (7.35 µs)**. That pattern is an SDRAM init + refresh, but no assignment of
-    H9/D12/E12/D13 to CS#/RAS#/CAS#/WE# decodes it cleanly (with or without an assumed HMC-bypass
-    inversion or per-pin skew). **Roles not determined** [guess: x16 SDRAM used 8 bits wide].
-- Other fabric-driven top-bank pins, from unrelated logic: A7 C6 B6 B7 C13 C15 D17 (LAB.025.041), G8 L7
-  (LABs y=44), F14 (025.024), H14 (026.023), J13 K16 (029.011), G13 (020.023.6), H15 (026.026),
-  F10 (MLAB.013.033); the open-drain group A8 B10 A10 A9 B12 A12 C16 + B11 (`MLAB.023.040.2:FFT0`);
-  G6 (open drain); H18 ← CMUXVG.025.045.0 (FPLL.054.037 C7, 12.29 MHz) and J19 ← CMUXVG.025.045.2
-  (C5, 3.07 MHz) as clock outputs; inputs B12 C16 F12 J11 J18 via `IOINTDQDIN`.
+Changed (23 Oct): the first pass decoded only 17 of this controller's outputs and couldn't assign
+the command lines. Listing **every** pin whose driver FF is on its clock (`~/scratch/memchips/
+pinclk.py`, throwaway) found the missing ones: **G13** (CAS#, `LAB.020.023.6`, next to the other
+command FFs) and a second command group in LABs y=40–41 (A7 B6 B7 C6 D17 C13/C15) with the
+open-drain group as its data bus. The notes had filed both as "unrelated logic". With them
+everything decodes (FastSim from power-up on the fixed `tools/netlist.py`, then each client
+request input poked; scripts `~/scratch/memchips/c2*.py`, throwaway):
+
+- Clock: everything on **FPLL.054.000 C5 = 148.5 MHz** (CMUXVG.021.000.3). SDRAM clock out on
+  **H8**: DDIO like AB11, IOE `CLKOUT.0` ← CMUXVG.021.000.2 = FPLL.054.000 C8, PRESET 5 /
+  PH_MUX 7 → leads C5 by 2.04 ns.
+- **Two chips, one address bus, separate command and data lines** [confirmed: command decode].
+  Group 1 (G1) and group 2 (G2) get init and refresh in the same cycles; client accesses can go to
+  G1 alone, G2 alone, or both (G2 one cycle after G1, using the address G1 put out).
+
+| signal | G1 | G2 | how |
+|---|---|---|---|
+| CS# | **D12** | **B6** | low for one cycle per command, high in the next (commands every 2nd cycle) |
+| RAS# | **D13** | **C6** | |
+| CAS# | **G13** | **A7** | |
+| WE# | **E12** | **B7** | READ and WRITE differ only here |
+| A10 | **H9** | **D17** | 1 at every PRECHARGE (= PRE ALL), 0 at READ/WRITE (no auto-precharge) and MRS; a row bit at ACT (H9) |
+| A0–A9 (shared) | N6 P6 P7 R7 P8 R9 H6 F7 D7 C8 (order unknown except N6/R7 = A4/A5) | same pins | row at ACT, column at READ/WRITE: **10 column bits = 1024 columns** |
+| A11 (shared) | **M6** | M6? | 1 at ACT with all address bits set, 0 at READ: a row-only bit. (The old notes' "sticky flag".) |
+| BA0/BA1 (shared) | E9, C9 (order unknown) | same | set at ACT and held through READ |
+| DQ0–7 | N8 J7 J9 K7 H11 G12 F12 J11 (push-pull, one OE FF `LAB.020.021.0:FFB0`) | **A8 A9 A10 A12 B10 B11 B12 C16** | G2: IOE input registers on all 8, captured into LABs y=39–41 on one enable (`LAB.026.041.6:FFT1`) |
+| ? | – | **C13 = C15** (one FF, `LAB.025.041.1:FFT0`) | 0 except in the MRS cycle and the one after; DQM or CKE of the pair, or G2's own A11 [guess] |
+| CLK | H8 | H8 (no other clock output on this domain) | |
+
+- Command encoding (CS# RAS# CAS# WE#) as usual: PRE 0010 (+A10 = 1), REF 0001, MRS 0000, ACT 0011,
+  READ 0101, WRITE 0100; deselect between commands.
+- **Init**: all FFs 0 → deselect for 2^16 cycles (441 µs), PRE ALL, REF, REF (18 cycles apart),
+  **MRS with N6 + R7 high**, then periodic refresh. **Refresh**: PRE ALL, REF every **1092 cycles
+  (7.35 µs)**, both groups at once.
+- **Access** (either group): PRE ALL, ACT, READ or WRITE, two cycles apart (tRP = tRCD = 2 cycles
+  = 13.5 ns at 148.5 MHz). Read data: the capture enable is high 4 cycles after the READ for both
+  groups, the same relation that gives CL3 on controller 1 (same C8 phase preset) → **CL3**; one
+  byte per access → **burst length 1**. So the MRS is CL3/BL1 = A4 + A5 = **N6 and R7**
+  [likely]. Write: OE on 2 cycles before the WRITE until 1 after.
+- G2's data pins are **open drain from one FF, inverted on the HMC bypass** (`i HMC.011.045:
+  IOINTADDRDOUT.32 1`): FF 0 = all eight released, FF 1 = all eight low. So the stock core only
+  ever writes 0x00 to G2 (its "write" request), and otherwise only reads it. A real controller
+  needs push-pull there (see "Open questions").
+- Clients: requests and addresses come from two other clock domains, FPLL.054.037 C3 =
+  36.87 MHz (CMUXHG.054.022.3) and C6 = 42.69 MHz (CMUXVG.025.045.1), i.e. the SPC player's own
+  logic (probably the APU's 64 KB audio RAM and the like), not video.
+
+Which chips: two x8 parts, 12 row bits (A0–A11), 1024 columns, 4 banks = 4096 × 1024 × 4 × 8 bit
+= 128 Mbit each, exactly the **IS42S81600F**. The pin positions fit too: everything sits in the
+top-left quarter of the FPGA (rows A–R, columns 6–17), toward U5 (top side, upper left of the
+FPGA) and U16 (directly behind U5 on the underside), which share their address pins through
+vias. Which group is which chip doesn't matter.
+
+Other fabric-driven top-bank pins, from unrelated logic: G8 L7 (LABs y=44), F14 (025.024), H14
+(026.023), J13 K16 (029.011, controller clock), H15 (026.026), F10 (MLAB.013.033); G6 (open
+drain, 21.34 MHz domain); H18 ← CMUXVG.025.045.0 (FPLL.054.037 C7, 12.29 MHz) and J19 ←
+CMUXVG.025.045.2 (C5, 3.07 MHz) as clock outputs; input J18 via `IOINTDQDIN`.
 
 ## Constant pins: AB10 and the open-drain group (after hwtest v1, Oct 2026)
 
@@ -318,8 +387,9 @@ Console run of hwtest v3 (`notes/buslog-2026-10-22-hwtest.md`, third run; page 4
   answer.
 - Fallbacks for the SNES core: **chip B alone as 8-bit memory** (half the bandwidth of the
   pair, two accesses per 16-bit ROM word; still enough for a SNES ROM at 74.25 MHz), or the
-  **x16 chip** on the top bank ("Top bank" above; its controller is not decoded far enough to
-  drive yet).
+  x8 pair on the top bank. Changed (23 Oct): "chip A/B" are the two bytes of the x16 U4, and
+  the top-bank controller drives the x8 pair U5 + U16, now decoded ("Which chip is which",
+  "Controller 2").
 
 ## Method
 
@@ -346,15 +416,26 @@ Console run of hwtest v3 (`notes/buslog-2026-10-22-hwtest.md`, third run; page 4
 
 ## Open questions
 
-- Chip A's enable (DQM/CKE/CS): not one of the 3A/3B/4A/7A constant pins (hwtest v3). AB10 =
-  chip B's DQM or CKE [likely]. A continuity check on the chips (TSOP-54 x8: CKE pin 37, DQM pin
-  39; check the datasheet) answers it directly.
-- The part: 512-column page (v2), so not 4096 × 1024; a 13th row bit?
+- **U4's second DQM** ("chip A"'s enable). Not a constant pin (hwtest v3), not a controller-1
+  pin. Candidates: C13/C15 (stock: 0 outside controller 2's MRS), then the other logic-driven
+  pins hwtest leaves as weak pull-ups (G6, G8, F14, H14, H15, L7, F10). A test core that runs
+  controller 2 at stock idle levels and switches C13/C15 per pass answers the first. A
+  continuity check on U4 (TSOP-54 x16: LDQM pin 15, UDQM pin 39) answers it directly.
+- C13/C15's role on the U5/U16 side (DQM, CKE or G2's A11). Driving them low (their stock level
+  outside MRS) is the safe default.
+- **G2's data pins are open drain in stock** (the stock core only writes 0x00 there). A real
+  controller needs them push-pull. Push-pull on an SDRAM DQ line is what G1 and controller 1
+  already do, but it isn't a setting spc.cor uses on those pins (see the pin-safety rule in
+  `notes/STATUS.md`). A rule-compliant first test can write through open drain plus weak
+  pull-ups (release the 1-bits, wait a few µs for the pull-ups, then issue the WRITE).
+- Controller 2's A0–A9 order (only N6/R7 = A4/A5 known, enough to copy the MRS) and BA0/BA1 on
+  E9/C9. Neither matters functionally.
 - BA0 vs BA1 on AA15/AB15; A11 = N2 is by elimination. Neither matters functionally.
-- A0–A6 identity (needed only for a different MRS than Analogue's): verify on hardware.
+- A0–A6 identity on controller 1 (needed only for a different MRS than Analogue's): verify on
+  hardware.
 - DDIO high/low data index (AB11/H8 polarity).
-- Second controller (148.5 MHz, H8 clock): command decode, and whether it is the x16 chip.
-- Client S's clock (`CMUXHG.000.022.3`, dynamic switchover) and what the stock core stores in the SDRAM.
+- Client S's clock (`CMUXHG.000.022.3`, dynamic switchover) and what the stock core stores in
+  the SDRAM.
 
 ## Recommendation for our controller (SNES ROM ≤ 6 MB)
 
@@ -385,5 +466,5 @@ Console run of hwtest v3 (`notes/buslog-2026-10-22-hwtest.md`, third run; page 4
 - **Read capture**: in fabric (no IOE input registers in nextpnr). Make the capture cycle offset
   after READ (CL + 0/1) and the capture clock edge configurable, and sweep them with a test pattern
   on hardware.
-- Drive the second controller's pins (the x16 chip?) to a safe idle, or leave them as inputs.
-  Until its decode is done, don't touch H8/N6–R9/the top-bank group.
+- Drive the second controller's pins to a safe idle, or leave them as inputs. Changed (23 Oct):
+  decoded ("Controller 2"); a core that uses U5/U16 drives them as listed there.
