@@ -13,11 +13,14 @@ foreach f {SPC700_pkg AddrGen AddSub ALU BCDAdj MCode MulDiv SPC700} {
 foreach f {bram mlab CEGen DSP_PKG DSP SMP PPU_PKG PPU CPU SWRAM SNES} {
     set_global_assignment -name VHDL_FILE $U/$f.vhd
 }
-foreach f {SA1/SA1MULT SA1/SA1DIV SA1/SA1Map DSP/DSPn DSP/OBC1 DSP/DSP_LHRomMap SRTC RTC4513} {
+foreach f {SA1/SA1MULT SA1/SA1DIV SA1/SA1Map DSP/DSPn DSP/OBC1 DSP/DSP_LHRomMap SRTC RTC4513
+           GSU/GSU_PKG GSU/GSUMap} {
     set_global_assignment -name VHDL_FILE $U/chip/$f.vhd
 }
 # SA1.vhd with quartus/snes_load/sa1_vbp.patch (made by `make`: build/snes_load/SA1.vhd)
 set_global_assignment -name VHDL_FILE ../../build/snes_load/SA1.vhd
+# GSU.vhd with quartus/snes_load/gsu_rom_hold.patch (build/snes_load/GSU.vhd)
+set_global_assignment -name VHDL_FILE ../../build/snes_load/GSU.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE $U/cheatcodes.sv
 set_global_assignment -name VERILOG_FILE $U/main.v
 

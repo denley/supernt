@@ -21,7 +21,7 @@ so ROM byte k arrives at link address 0x2_0100 + k. Info block (little-endian):
   +0x0C  4  CRC-32 (zlib) of the ROM
   +0x10  1  1 = a copier header was dropped
   +0x11  1  this tool's mapper guess, MiSTer ROM_TYPE encoding (bits 3-0: 0 LoROM, 1 HiROM,
-            2 ExHiROM; bits 7-4: chip, 6 = SA-1); the core decides by itself and shows both
+            2 ExHiROM; bits 7-4: chip, 6 = SA-1, 7 = Super FX); the core decides by itself and shows both
   +0x12  1  header ROM size byte    +0x13  1  header RAM size byte
   +0x14 12  reserved (0)
   +0x20 32  ROM name (ASCII, space-padded): the core shows it on its diagnostics page
@@ -99,6 +99,8 @@ def header_guess(rom):
         chip = 0
         if mapping == 0x23 and rtype in (0x32, 0x34, 0x35):
             chip = 0x60                                  # SA-1
+        elif mapping == 0x20 and rtype in (0x13, 0x14, 0x15, 0x1A):
+            chip = 0x70                                  # Super FX (GSU)
         if kind == 0 and mapping in (0x20, 0x22):
             s += 2
         if kind == 1 and mapping == 0x21:
@@ -159,7 +161,7 @@ def main():
           f'(link 0x{LINK_BASE + ROM_OFF:08X}-0x{LINK_BASE + ROM_OFF + len(rom) - 1:08X}),'
           f' CRC-32 {crc_rom:08X}' + (', 512-byte copier header dropped' if copier else ''))
     if hdr:
-        kind = MAP_NAMES[hdr['kind']] + (' + SA-1' if hdr['chip'] == 0x60 else '')
+        kind = MAP_NAMES[hdr['kind']] + {0x60: ' + SA-1', 0x70: ' + Super FX'}.get(hdr['chip'], '')
         print(f'  header at ROM 0x{hdr["base"]:06X}: "{hdr["title"]}" map {hdr["mapping"]:02X} type'
               f' {hdr["rtype"]:02X} ROM {hdr["rsize"]:02X} RAM {hdr["ssize"]:02X} checksum'
               f' {hdr["csum"]:04X}/{hdr["compl"]:04X} -> {kind}, ROM_TYPE {rom_type:02X}'

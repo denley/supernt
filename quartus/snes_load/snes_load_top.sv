@@ -55,6 +55,7 @@ module top #(
     parameter [15:0] RESET_CYCLES = 16'hffff, // core reset after the load (clk_sys cycles, ~3 ms)
     parameter AUD_FRAMING = 0,      // I2S, confirmed
     parameter BSRAM_AW   = 16,      // BW-RAM / SRAM in block RAM: 64 KB (v2; ARAM is in SDRAM)
+    parameter USE_GSU    = 1,       // v7: Super FX (GSU) carts too (ROM_TYPE 7x; GSU RAM = the BSRAM)
     parameter TMPL_HEX   = "../../build/snes_load/diag.hex",
     parameter FONT_HEX   = "../../build/hwtest/font.hex",
     // simulation shortcuts (the real values are the defaults)
@@ -161,9 +162,9 @@ module top #(
         .last_scr_ms(last_scr_ms), .r21(r21), .r21_ms(r21_ms), .n_r21(n_r21));
 
     // ================================================================ SDRAM
-    wire [23:0] rom_addr;
+    wire [23:0] rom_addr /* verilator public_flat_rd */;
     wire        rom_word, rom_oe_n, sysclkf_ce, sysclkr_ce;
-    wire [15:0] rom_q;
+    wire [15:0] rom_q /* verilator public_flat_rd */;
     wire        sd_ready /* verilator public_flat_rd */, wr_ack, aux_ack, aux_valid;
     wire        wr_req, aux_req;
     wire [22:0] wr_addr, aux_addr;
@@ -174,7 +175,7 @@ module top #(
     wire [15:0] sd_late /* verilator public_flat_rd */;
     wire [10:0] sd_rfmax /* verilator public_flat_rd */;
     wire [31:0] sd_reads /* verilator public_flat_rd */;
-    wire        rom_en, ld_sa1;
+    wire        rom_en, ld_sa1, ld_gsu;
     wire [15:0] aram_addr;
     wire [7:0]  aram_d, aram_q;
     wire        aram_rd, aram_wr;
@@ -248,7 +249,7 @@ module top #(
         .rom_size(rom_size), .crc_rom(crc_rom), .crc_sd(crc_sd), .n_order(n_order),
         .n_drop(n_drop), .n_big(n_big), .n_ign(n_ign), .t_start(t_start), .t_end(t_end), .t_boot(t_boot),
         .n_loads(n_loads), .info_ok(info_ok), .info_size(info_size), .info_crc(info_crc),
-        .info_type(info_type), .kind(ld_kind), .sa1(ld_sa1), .chip_unsup(ld_unsup),
+        .info_type(info_type), .kind(ld_kind), .sa1(ld_sa1), .gsu(ld_gsu), .chip_unsup(ld_unsup),
         .scores(scores), .hdr_w0(hdr_w0), .hdr_w1(hdr_w1), .hdr_compl(hdr_compl),
         .ok_info(ok_info), .ok_fly(ok_fly),
         .ram_keep(ram_keep), .ram_clear(ram_clear), .last_game(last_game), .aram_clr_done());
@@ -275,7 +276,7 @@ module top #(
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [1:0]  clr_sync = 2'b00;
     always @(posedge clk_sys) clr_sync <= {clr_sync[0], ram_clear};
-    snes_sdram_core #(.BSRAM_AW(BSRAM_AW), .ARAM_EXT(1)) snes (
+    snes_sdram_core #(.BSRAM_AW(BSRAM_AW), .ARAM_EXT(1), .USE_GSU(USE_GSU)) snes (
         .clk_sys(clk_sys), .reset(core_reset), .rom_type(rom_type), .rom_mask(rom_mask),
         .ram_mask(ram_mask),
         .rom_addr(rom_addr), .rom_word(rom_word), .rom_q(rom_q), .rom_oe_n(rom_oe_n),
@@ -574,7 +575,7 @@ module top #(
             default:  s_state = "NOT A ROM FILE          ";
         endcase
         case ({ld_kind, ld_sa1})
-            3'b000:  s_map = "LoROM                   ";
+            3'b000:  s_map = ld_gsu ? "LoROM + SUPER FX        " : "LoROM                   ";
             3'b001:  s_map = "LoROM + SA-1            ";
             3'b010:  s_map = "HiROM                   ";
             3'b011:  s_map = "HiROM + SA-1            ";

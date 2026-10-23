@@ -26,9 +26,10 @@
 // 0xFFC0, ExHiROM 0x40FFC0: +4 if checksum + complement = FFFF, +2 dev id 33, +1 each for a
 // plausible type/ROM size/RAM size/region, +2 for the matching map mode, ExHiROM +4 if any):
 // LoROM if its score is >= both others, HiROM if >= ExHiROM, ExHiROM if > 0. Chip: SA-1
-// (map 23, type 32/34/35) -> ROM_TYPE 6x; other chips are not in this core (flagged, booted as
-// plain Lo/HiROM). ROM mask = next power of two of the size - 1; RAM mask = (1 KB << RAM size)
-// - 1 (0 for none).
+// (map 23, type 32/34/35) -> ROM_TYPE 6x; Super FX / GSU (map 20, type 13/14/15/1A) -> ROM_TYPE
+// 7x, its RAM size from 0x7FBD (FF = Star Fox's 32 KB, at most 64 KB) as rom_parser.sv; other
+// chips are not in this core (flagged, booted as plain Lo/HiROM). ROM mask = next power of two
+// of the size - 1; RAM mask = (1 KB << RAM size) - 1 (0 for none).
 module rom_loader #(
     parameter integer CLK_KHZ  = 107210,
     parameter integer DONE_MS  = 250,
@@ -85,6 +86,7 @@ module rom_loader #(
     output wire [7:0]  info_type,           // the tool's mapper guess
     output reg  [1:0]  kind = 2'd0,         // 0 LoROM 1 HiROM 2 ExHiROM
     output reg         sa1 = 1'b0,
+    output reg         gsu = 1'b0,
     output reg         chip_unsup = 1'b0,
     output reg  [11:0] scores = 12'd0,      // {ExHi, Hi, Lo} 4 bits each (saturated)
     output reg  [31:0] hdr_w0 = 32'd0,      // chosen header {map, type, rom size, ram size}
@@ -125,6 +127,7 @@ module rom_loader #(
     reg  [7:0]  b_d = 8'd0;
     reg  [1:0]  b_area = 2'd0;
     reg         b_hdr = 1'b0;
+    reg  [7:0]  gsu_ramsz = 8'd0;               // ROM byte 0x7FBD (GSU carts' RAM size)
     always @(posedge clk) begin
         b_go <= f_go;
         b_off <= off;
@@ -242,6 +245,8 @@ module rom_loader #(
     reg [31:0] t_show = 32'd0;
     wire [7:0] map_w = map_q, typ_w = typ_q, ssz_w = ssz_q;
     wire       sa1_w = map_w == 8'h23 && (typ_w == 8'h32 || typ_w == 8'h34 || typ_w == 8'h35);
+    wire       gsu_w = map_w == 8'h20 && (typ_w == 8'h13 || typ_w == 8'h14 || typ_w == 8'h15 || typ_w == 8'h1A);
+    wire [2:0] gsu_rs = gsu_ramsz == 8'hFF ? 3'd5 : gsu_ramsz > 8'd6 ? 3'd6 : gsu_ramsz[2:0];
     wire       got_all = info_ok && rom_size >= info_size && info_size != 32'd0 && n_file > ROM_OFF;
     wire       idle_long = ms - t_last >= DONE_MS;
     always @(posedge clk) begin
@@ -294,6 +299,7 @@ module rom_loader #(
                     push <= 1'b1;
                     push_d <= {b_k[22:0], b_d};
                 end
+                if (b_k == 32'h7FBD) gsu_ramsz <= b_d;
                 if (b_hdr) begin
                     if (b_k[4:0] < 5'd21) begin
                         t_we <= 1'b1; t_wa <= {b_area, b_k[4:0]}; t_wd <= b_d;
@@ -314,19 +320,20 @@ module rom_loader #(
                 scores <= {sc2_q, sc1_q, sc0_q};
                 kind <= win_q;
                 sa1 <= sa1_w;
+                gsu <= gsu_w;
                 // chips this core doesn't have (rom_parser.sv's list, roughly): DSP/ST/OBC1
                 // (type 03/05/F6/25 with map 20/21/30/31), SPC7110 (map 3A), S-RTC (35/55),
                 // CX4 (20/F3), SDD1 (32/43,45), GSU (20/13,14,15,1A)
                 chip_unsup <= (typ_w == 8'h03 || typ_w == 8'h05 || typ_w == 8'hF6 || typ_w == 8'h25 ||
-                               typ_w == 8'hF3 || typ_w == 8'h43 || typ_w == 8'h45 || typ_w == 8'h13 ||
-                               typ_w == 8'h14 || typ_w == 8'h15 || typ_w == 8'h1A || typ_w == 8'h55 ||
-                               map_w == 8'h3A) && map_w != 8'h23;
+                               typ_w == 8'hF3 || typ_w == 8'h43 || typ_w == 8'h45 || typ_w == 8'h55 ||
+                               map_w == 8'h3A) && map_w != 8'h23 && !gsu_w;
                 hdr_w0 <= {hf[win_q][0], hf[win_q][1], hf[win_q][2], hf[win_q][3]};
                 hdr_w1 <= {hf[win_q][4], hf[win_q][5], hf[win_q][10], hf[win_q][9]};
                 hdr_compl <= {hf[win_q][8], hf[win_q][7]};
-                rom_type <= {sa1_w ? 4'h6 : 4'h0, 2'b00, win_q};
+                rom_type <= {sa1_w ? 4'h6 : gsu_w ? 4'h7 : 4'h0, 2'b00, win_q};
                 rom_mask <= pmask_q;
-                ram_mask <= ssz_w == 8'd0 ? 24'd0 : ssz_w > 8'd7 ? 24'h01FFFF : (24'd1024 << ssz_w[2:0]) - 24'd1;
+                ram_mask <= gsu_w ? (24'd1024 << gsu_rs) - 24'd1 :
+                            ssz_w == 8'd0 ? 24'd0 : ssz_w > 8'd7 ? 24'h01FFFF : (24'd1024 << ssz_w[2:0]) - 24'd1;
                 vk <= 24'd0; vn <= 24'd0; vcrc <= 32'hFFFFFFFF;
                 state <= S_VERIFY;
             end

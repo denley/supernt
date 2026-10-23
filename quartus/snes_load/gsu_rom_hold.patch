@@ -1,0 +1,33 @@
+--- GSU.vhd
++++ GSU.vhd
+@@ -220,6 +220,7 @@
+ 	signal SNES_ROM_ADDR 	: std_logic_vector(23 downto 0);
+ 	signal SNES_RAM_A 		: std_logic_vector(16 downto 0);
+ 	signal INT_ROM_A 			: std_logic_vector(23 downto 0);
++	signal ROM_A_LAST 		: std_logic_vector(23 downto 0);	-- Super Nt: ROM address hold
+ 	signal SNES_CACHE_ADDR 	: std_logic_vector(8 downto 0);
+ --	signal GSU_ROM_RD 		: std_logic;
+ 	signal ROM_RD_CNT 		: unsigned(1 downto 0);
+@@ -1260,10 +1261,21 @@
+ 		end if;
+ 	end process;
+ 	
++	-- Super Nt (quartus/snes_load/gsu_rom_hold.patch): the ROM address only follows the GSU
++	-- while it reads ROM (load, fetch, cache fill); otherwise it holds the last one, so the
++	-- program counter running through the cache doesn't start an SDRAM read every cycle.
+ 	INT_ROM_A <= SNES_ROM_ADDR when GSU_ROM_ACCESS = '0' else 
+ 					 CACHE_SRC_ADDR when ROMST = ROMST_CACHE else 
+ 					 ROMBR & R(14) when ROMST = ROMST_LOAD else 
+-					 PBR & R(15);
++					 PBR & R(15) when ROMST = ROMST_FETCH else
++					 ROM_A_LAST;
++
++	process(CLK)
++	begin
++		if rising_edge(CLK) then
++			ROM_A_LAST <= INT_ROM_A;
++		end if;
++	end process;
+ 
+ 				
+ 	ROM_A <= INT_ROM_A(20 downto 0) when INT_ROM_A(22) = '1' else INT_ROM_A(21 downto 16) & INT_ROM_A(14 downto 0);

@@ -11,7 +11,7 @@ Usage: ghdl_fix.py file.v prefix top main.v
   second declaration and the self-assignment are dropped.
 - Top ports take the case main.v uses for the pin (VHDL is case-insensitive; main.v mixes
   `.mclk` and `.DBG_BG_EN`); others are lower-cased.
-- An `enable` input of SA1Map/DSP_LHRomMap is removed and tied to 1: they declare
+- An `enable` input of SA1Map/DSP_LHRomMap/GSUMap is removed and tied to 1: they declare
   `ENABLE : in std_logic := '1'`, main.v leaves it unconnected, and the VHDL default is lost in
   the netlist (notes/snes-port.md).
 - `parameter USE_DSPn = 0;` is added to DSP_LHRomMap (main.v passes it; the netlist is
@@ -64,7 +64,7 @@ for p in re.findall(r'(?:input|output|inout)\s+(?:\[[^\]]*\]\s*)?(\w+)', hdr):
         body = re.sub(r'\b%s\b' % re.escape(p), want, body)
 hdr_end = body.index(');')
 m = re.search(r'\n\s*input\s+enable,', body[:hdr_end])
-if m and top in ('SA1Map', 'DSP_LHRomMap'):
+if m and top in ('SA1Map', 'DSP_LHRomMap', 'GSUMap'):
     body = body[:m.start()] + body[m.end():]
     hdr_end = body.index(');')
     body = body[:hdr_end + 2] + "\n  wire enable = 1'b1; // VHDL port default (ghdl_fix.py)" + body[hdr_end + 2:]

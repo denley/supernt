@@ -21,11 +21,12 @@
 // code). Reads have one clk_sys cycle of latency like the altsyncram wrappers in bram.vhd.
 module snes_sdram_core #(
     parameter        BSRAM_AW = 11,          // BW-RAM bytes = 2^BSRAM_AW
-    parameter        ARAM_EXT = 0            // 1: ARAM outside (aram_* ports, quartus/snes_load v2)
+    parameter        ARAM_EXT = 0,           // 1: ARAM outside (aram_* ports, quartus/snes_load v2)
+    parameter        USE_GSU  = 0            // 1: Super FX (GSU) too (quartus/snes_load v7)
 ) (
     input  wire        clk_sys,      // SNES master clock, 21.442 MHz (MCLK = ACLK)
     input  wire        reset,        // synchronous to clk_sys, active high
-    input  wire [7:0]  rom_type,     // [7:4] = 6: SA-1, [3:0] = 0 LoROM, 1 HiROM, 2 ExHiROM
+    input  wire [7:0]  rom_type,     // [7:4] = 6: SA-1, 7: GSU; [3:0] = 0 LoROM, 1 HiROM, 2 ExHiROM
     input  wire [23:0] rom_mask,     // (1024 << header ROM size) - 1; $7FFF = 32 KB
     input  wire [23:0] ram_mask,     // (1024 << header RAM size) - 1, 0 = none
 
@@ -93,7 +94,7 @@ module snes_sdram_core #(
     assign joy_clk = joy1_clk | joy2_clk;
 
     main #(
-        .USE_CX4(1'b0), .USE_SDD1(1'b0), .USE_GSU(1'b0), .USE_SA1(1'b1), .USE_DSPn(1'b0),
+        .USE_CX4(1'b0), .USE_SDD1(1'b0), .USE_GSU(USE_GSU[0]), .USE_SA1(1'b1), .USE_DSPn(1'b0),
         .USE_SPC7110(1'b0), .USE_BSX(1'b0), .USE_MSU(1'b0), .USE_SS(1'b0), .USE_SUFAMI(1'b0)
     ) main (
         .RESET_N(reset_n),

@@ -38,7 +38,8 @@
 // Usage: tb_snes_load <frames> <out-prefix> [file.spc]  (default build/snes_load/sa1test.spc)
 // Environment: TB_FAST=1 (no gaps between runs), TB_PULSE=ns (strobe phases, default 150),
 // TB_NOMENU=1 (v1 flow: the PIC's UI loop goes on after the file), TB_QUIET=1 (the v2 PIC, no
-// presses after the boot: for running games), TB_FILE2=file.spc, TB_GAME=1 (any ROM: don't check the SA-1
+// presses after the boot: for running games), TB_ROMLAT=1 (ROM byte latency histogram, see the loop),
+// TB_FILE2=file.spc, TB_GAME=1 (any ROM: don't check the SA-1
 // test results, check the mapper against TB_TYPE/TB_MASK hex), TB_WIN=lo,hi (the SDRAM model's
 // read window, default 8,8), TB_DEBUG=1.
 // Exit status 0 = PASS (last line).
@@ -382,6 +383,9 @@ int main(int argc, char **argv) {
 
     const int W = 1280, H = 720;
     std::vector<unsigned char> img(W * H * 3, 0);
+    const bool romlat = getenv("TB_ROMLAT") != nullptr;
+    uint32_t rl_addr = 0xFFFFFFFF; int rl_cnt = 0; bool rl_found = true;
+    unsigned long long lat_hist[16] = {0}, miss_hist[16] = {0};
     int frame = -1, line = -1, x = 0, lines_total = 0, conflicts = 0;
     bool ok_lock = true, ok_ring = true, ok_pix = false, ok_wram = false, ok_browser = false,
          ok_cursor = false, ok_diag = false;
@@ -508,6 +512,21 @@ int main(int argc, char **argv) {
             mem_edges++;
             tmem += hmem;
             tb->eval();
+            // TB_ROMLAT: for every ROM address the core presents while the game runs, the clk_sys
+            // edges until rom_q[7:0] shows that byte of the ROM (lat_hist), or how long the
+            // address stayed when it never did (miss_hist)
+            if (romlat && sys_edge && tb->clk_sys && r->tb__DOT__dut__DOT__ld_state == 5) {
+                uint32_t a = r->tb__DOT__dut__DOT__rom_addr & 0x7FFFFF;
+                uint8_t q = r->tb__DOT__dut__DOT__rom_q & 0xFF;
+                if (a != rl_addr) {
+                    if (!rl_found) miss_hist[rl_cnt < 15 ? rl_cnt : 15]++;
+                    rl_addr = a; rl_cnt = 0; rl_found = false;
+                } else if (rl_cnt < 1000) rl_cnt++;
+                uint32_t off = 0x10200 + a;
+                if (!rl_found && off < file.size() && q == file[off]) {
+                    rl_found = true; lat_hist[rl_cnt < 15 ? rl_cnt : 15]++;
+                }
+            }
             if (sys_edge && tb->clk_sys && r->tb__DOT__dut__DOT__snes_pad_v) {
                 if (r->tb__DOT__dut__DOT__joy2_lat == 0xFF7F) joy2_a_seen = true;   // A only, just latched
                 int jc = r->tb__DOT__dut__DOT__joy2_clk;
@@ -517,6 +536,13 @@ int main(int argc, char **argv) {
         }
     }
     tb->final();
+    if (romlat) {
+        printf("ROM byte latency (clk_sys edges after the address change, game only):");
+        for (int k = 0; k < 16; k++) printf(" %d:%llu", k, (unsigned long long)lat_hist[k]);
+        printf("\nROM addresses left before their byte appeared (by how long they stayed):");
+        for (int k = 0; k < 16; k++) printf(" %d:%llu", k, (unsigned long long)miss_hist[k]);
+        printf("\n");
+    }
     if (getenv("TB_DEBUG")) {                         // SDRAM model contents vs the ROM
         auto &sd = r->tb__DOT__sdram__DOT__mem;
         int bad = 0;

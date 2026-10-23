@@ -395,7 +395,8 @@ sim-snes-sdram: $(SNES_SDRAM_OBJ)/Vtb build/snes/sa1test.hex
 
 # SNES + SA-1 core that loads its ROM over the PIC32 link (quartus/snes_load, notes/snes-load.md):
 # the diagnostics page template and the console font are built into the core.
-quartus/snes_load/snes_load.rbf: build/snes_load/diag.hex build/hwtest/font.hex build/snes_load/SA1.vhd
+quartus/snes_load/snes_load.rbf: build/snes_load/diag.hex build/hwtest/font.hex build/snes_load/SA1.vhd \
+  build/snes_load/GSU.vhd
 # SA1.vhd with the variable-length bit processing taking its ROM word one SA-1 cycle later
 # (quartus/snes_load/sa1_vbp.patch; the 8-bit ROM delivers a word's high byte one memory cycle
 # after the low one, notes/snes-load.md).
@@ -403,6 +404,12 @@ build/snes_load/SA1.vhd: $(SNES_UP)/chip/SA1/SA1.vhd quartus/snes_load/sa1_vbp.p
 	mkdir -p build/snes_load
 	cp $< $@
 	patch -s $@ < quartus/snes_load/sa1_vbp.patch
+# GSU.vhd with quartus/snes_load/gsu_rom_hold.patch (v7: the GSU's ROM address holds while it
+# isn't reading ROM, so its program counter doesn't keep the 8-bit SDRAM busy)
+build/snes_load/GSU.vhd: $(SNES_UP)/chip/GSU/GSU.vhd quartus/snes_load/gsu_rom_hold.patch
+	mkdir -p build/snes_load
+	cp $< $@
+	patch -s $@ < quartus/snes_load/gsu_rom_hold.patch
 build/snes_load/diag.hex: quartus/snes_load/diag.txt tools/mkscreen.py
 	mkdir -p build/snes_load
 	python3 -I tools/mkscreen.py $< $@
@@ -430,8 +437,16 @@ build/snes_load/smrpg.spc: tools/rom2spc.py
 build/snes_load/sa1test20.spc: build/snes/sa1test.sfc tools/rom2spc.py
 	mkdir -p build/snes_load
 	python3 -I tools/rom2spc.py $< $@ --title "SA1 TEST 20S" --length 20
+# Super FX (quartus/snes_load v7)
+build/snes_load/yoshi.spc: tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Super Mario World 2 - Yoshi's Island (U) (V1.1).smc" $@ --title "YOSHIS ISLAND"
+build/snes_load/starfox.spc: tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Star Fox (U) (V1.2) [!].smc" $@ --title "STAR FOX"
 load-spcs: build/snes_load/sa1test.spc build/snes_load/gradius3.spc build/snes_load/kirbyss.spc \
-  build/snes_load/kdl3.spc build/snes_load/smrpg.spc build/snes_load/sa1test20.spc
+  build/snes_load/kdl3.spc build/snes_load/smrpg.spc build/snes_load/sa1test20.spc \
+  build/snes_load/yoshi.spc build/snes_load/starfox.spc
 .PHONY: load-spcs
 
 # End-to-end simulation of quartus/snes_load (notes/snes-load.md, "Simulation"): Verilator, the
@@ -469,10 +484,47 @@ $(SNES_LOAD_SIM)/obj/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_LOAD_SIM)/vlog/SA1Map.v
 	verilator --cc --exe --build -j 4 -O2 --top-module tb +1364-2005ext+v -Wno-fatal -Wno-lint -Wno-style \
 	  -Wno-MULTIDRIVEN -Wno-UNOPTFLAT -Wno-COMBDLY --x-assign fast --x-initial fast \
 	  -CFLAGS -O1 -Mdir $(SNES_LOAD_SIM)/obj -o Vtb \
-	  -GTMPL_HEX='"$(CURDIR)/build/snes_load/diag.hex"' -GFONT_HEX='"$(CURDIR)/build/hwtest/font.hex"' \
+	  -GTMPL_HEX='"$(CURDIR)/build/snes_load/diag.hex"' -GFONT_HEX='"$(CURDIR)/build/hwtest/font.hex"' -GUSE_GSU=0 \
 	  $(SNES_LOAD_SV) $(SNES_SIM)/vlog/SNES.v $(SNES_LOAD_SIM)/vlog/SA1Map.v \
 	  $(SNES_SIM)/vlog/DSP_LHRomMap.v $(abspath quartus/snes_load/sim/tb_snes_load.cpp) \
 	  > $(SNES_LOAD_SIM)/verilator.log 2>&1 || { tail -30 $(SNES_LOAD_SIM)/verilator.log; exit 1; }
+
+# The same top with the Super FX (USE_GSU = 1, quartus/snes_load v7) in its own work dir:
+# GSU.vhd through quartus/snes_load/sim/gsu_split.py (GHDL's synthesis takes no process with
+# both clock edges), then `ghdl synth` GSUMap like SA1Map.
+SNES_GSU_SIM ?= $(HOME)/scratch/snes-gsu/sim
+$(SNES_GSU_SIM)/vlog/GSUMap.v: $(SNES_SIM)/vlog/.stamp quartus/snes_load/sim/gsu_split.py quartus/snes/sim/ghdl_fix.py \
+    build/snes_load/GSU.vhd
+	rm -rf $(SNES_GSU_SIM)/upstream $(SNES_GSU_SIM)/work $(SNES_GSU_SIM)/vlog
+	mkdir -p $(SNES_GSU_SIM)/upstream $(SNES_GSU_SIM)/work $(SNES_GSU_SIM)/vlog
+	cp $(SNES_UP)/chip/GSU/GSU_PKG.vhd $(SNES_UP)/chip/GSU/GSUMap.vhd $(SNES_GSU_SIM)/upstream/
+	python3 -I quartus/snes_load/sim/gsu_split.py build/snes_load/GSU.vhd $(SNES_GSU_SIM)/upstream/GSU.vhd
+	cd $(SNES_GSU_SIM)/work && $(SNES_GHDL) -a $(SNES_GA) $(abspath quartus/snes/sim/bram_sim.vhd \
+	  quartus/snes/sim/mlab_sim.vhd) ../upstream/GSU_PKG.vhd ../upstream/GSU.vhd ../upstream/GSUMap.vhd
+	cd $(SNES_GSU_SIM)/work && $(SNES_GHDL) synth $(SNES_GA) --latches --out=verilog GSUMap \
+	  > ../vlog/GSUMap.v 2> ../vlog/GSUMap.log || { tail ../vlog/GSUMap.log; exit 1; }
+	python3 -I quartus/snes/sim/ghdl_fix.py $(SNES_GSU_SIM)/vlog/GSUMap.v GSUMap_ GSUMap $(SNES_UP)/main.v
+
+$(SNES_GSU_SIM)/obj/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_LOAD_SIM)/vlog/SA1Map.v $(SNES_GSU_SIM)/vlog/GSUMap.v \
+    $(SNES_LOAD_SV) quartus/snes_load/sim/tb_snes_load.cpp build/snes_load/diag.hex build/hwtest/font.hex
+	mkdir -p $(SNES_GSU_SIM)
+	verilator --cc --exe --build -j 4 -O2 --top-module tb +1364-2005ext+v -Wno-fatal -Wno-lint -Wno-style \
+	  -Wno-MULTIDRIVEN -Wno-UNOPTFLAT -Wno-COMBDLY --x-assign fast --x-initial fast \
+	  -CFLAGS -O1 -Mdir $(SNES_GSU_SIM)/obj -o Vtb \
+	  -GTMPL_HEX='"$(CURDIR)/build/snes_load/diag.hex"' -GFONT_HEX='"$(CURDIR)/build/hwtest/font.hex"' -GUSE_GSU=1 \
+	  $(SNES_LOAD_SV) $(SNES_SIM)/vlog/SNES.v $(SNES_LOAD_SIM)/vlog/SA1Map.v $(SNES_GSU_SIM)/vlog/GSUMap.v \
+	  $(SNES_SIM)/vlog/DSP_LHRomMap.v $(abspath quartus/snes_load/sim/tb_snes_load.cpp) \
+	  > $(SNES_GSU_SIM)/verilator.log 2>&1 || { tail -30 $(SNES_GSU_SIM)/verilator.log; exit 1; }
+
+# sim-snes-gsu-yoshi / -starfox: Yoshi's Island (2 MB, GSU-2) / Star Fox (1 MB, GSU-1) on the
+# GSU build: fast transfer, then SNES_GAME_FRAMES of the game.
+sim-snes-gsu-%: $(SNES_GSU_SIM)/obj/Vtb build/snes_load/%.spc
+	mkdir -p build/sim
+	rm -f build/sim/snes_gsu_$*-*.p?m
+	TB_FAST=1 TB_PULSE=45 TB_GAME=1 TB_QUIET=1 TB_TYPE=70 $(SNES_GSU_SIM)/obj/Vtb \
+	  $(SNES_GAME_FRAMES) build/sim/snes_gsu_$*- build/snes_load/$*.spc > build/sim/snes_gsu_$*.log; s=$$?; \
+	  tail -6 build/sim/snes_gsu_$*.log; \
+	  for f in build/sim/snes_gsu_$*-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
 
 sim-snes-load: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/sa1test.spc
 	mkdir -p build/sim
