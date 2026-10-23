@@ -9,7 +9,7 @@
 // combination 40 ms), the PIC counts as active for 60 ms after a UI write,
 // 256-cycle SNES reset, 200-cycle SDRAM power-up wait.
 module tb #(parameter CAPTURE_HALF = 8, parameter TMPL_HEX = "diag.hex",
-            parameter FONT_HEX = "font.hex", parameter USE_GSU = 0) (
+            parameter FONT_HEX = "font.hex", parameter USE_GSU = 0, parameter USE_SA1 = 1) (
     input  wire       clk,       // 74.25 MHz board clock
     input  wire       clk_sys,   // SNES clock (PLL output 0, 21.44196 MHz)
     input  wire       clk_mem,   // SDRAM clock (PLL output 1, 4 x clk_sys)
@@ -38,7 +38,7 @@ module tb #(parameter CAPTURE_HALF = 8, parameter TMPL_HEX = "diag.hex",
     assign pic_din = link_d;
     assign link_oe = dut.link_oe;
     top #(.SYNC_ORDER(0), .RESET_CYCLES(16'd256), .CAPTURE_HALF(CAPTURE_HALF),
-          .TMPL_HEX(TMPL_HEX), .FONT_HEX(FONT_HEX), .USE_GSU(USE_GSU),
+          .TMPL_HEX(TMPL_HEX), .FONT_HEX(FONT_HEX), .USE_GSU(USE_GSU), .USE_SA1(USE_SA1),
           .PAD_START_US(2000), .SHOW_MS(30), .COMBO_MS(20), .MENU_MS(40), .FOLLOW_MS(60),
           .INIT_CYCLES(250)) dut (
         .clk(clk), .pclk(pclk), .s0(s0), .s1(s1), .s2(s2), .ch1(ch1), .ch2(ch2), .ch3(ch3),

@@ -397,6 +397,9 @@ sim-snes-sdram: $(SNES_SDRAM_OBJ)/Vtb build/snes/sa1test.hex
 # the diagnostics page template and the console font are built into the core.
 quartus/snes_load/snes_load.rbf: build/snes_load/diag.hex build/hwtest/font.hex build/snes_load/SA1.vhd \
   build/snes_load/GSU.vhd
+# The Super FX test build (quartus/snes_gsu): quartus/snes_load without the SA-1 (USE_SA1 = 0).
+quartus/snes_gsu/snes_gsu.rbf: build/snes_load/diag.hex build/hwtest/font.hex build/snes_load/SA1.vhd \
+  build/snes_load/GSU.vhd
 # SA1.vhd with the variable-length bit processing taking its ROM word one SA-1 cycle later
 # (quartus/snes_load/sa1_vbp.patch; the 8-bit ROM delivers a word's high byte one memory cycle
 # after the low one, notes/snes-load.md).
@@ -497,6 +500,7 @@ $(SNES_LOAD_SIM)/obj/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_LOAD_SIM)/vlog/SA1Map.v
 # GSU.vhd through quartus/snes_load/sim/gsu_split.py (GHDL's synthesis takes no process with
 # both clock edges), then `ghdl synth` GSUMap like SA1Map.
 SNES_GSU_SIM ?= $(HOME)/scratch/snes-gsu/sim
+SNES_GSU_SA1 ?= 1     # 0: the quartus/snes_gsu variant (no SA-1); use another SNES_GSU_SIM
 $(SNES_GSU_SIM)/vlog/GSUMap.v: $(SNES_SIM)/vlog/.stamp quartus/snes_load/sim/gsu_split.py quartus/snes/sim/ghdl_fix.py \
     build/snes_load/GSU.vhd
 	rm -rf $(SNES_GSU_SIM)/upstream $(SNES_GSU_SIM)/work $(SNES_GSU_SIM)/vlog
@@ -515,7 +519,7 @@ $(SNES_GSU_SIM)/obj/Vtb: $(SNES_SIM)/vlog/.stamp $(SNES_LOAD_SIM)/vlog/SA1Map.v 
 	verilator --cc --exe --build -j 4 -O2 --top-module tb +1364-2005ext+v -Wno-fatal -Wno-lint -Wno-style \
 	  -Wno-MULTIDRIVEN -Wno-UNOPTFLAT -Wno-COMBDLY --x-assign fast --x-initial fast \
 	  -CFLAGS -O1 -Mdir $(SNES_GSU_SIM)/obj -o Vtb \
-	  -GTMPL_HEX='"$(CURDIR)/build/snes_load/diag.hex"' -GFONT_HEX='"$(CURDIR)/build/hwtest/font.hex"' -GUSE_GSU=1 \
+	  -GTMPL_HEX='"$(CURDIR)/build/snes_load/diag.hex"' -GFONT_HEX='"$(CURDIR)/build/hwtest/font.hex"' -GUSE_GSU=1 -GUSE_SA1=$(SNES_GSU_SA1) \
 	  $(SNES_LOAD_SV) $(SNES_SIM)/vlog/SNES.v $(SNES_LOAD_SIM)/vlog/SA1Map.v $(SNES_GSU_SIM)/vlog/GSUMap.v \
 	  $(SNES_SIM)/vlog/DSP_LHRomMap.v $(abspath quartus/snes_load/sim/tb_snes_load.cpp) \
 	  > $(SNES_GSU_SIM)/verilator.log 2>&1 || { tail -30 $(SNES_GSU_SIM)/verilator.log; exit 1; }

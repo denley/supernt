@@ -45,6 +45,11 @@ set_multicycle_path -setup -end [expr {2 + $lag_e}] -from $clk_sys -to $mem_regs
 set_multicycle_path -hold -end 1 -from $clk_sys -to $mem_regs
 if {$lag_e} {
     set_multicycle_path -setup -end 2 -from $clk_sys -to [get_registers {sdram_rom8:sdram|tog_d}]
+    # the fitter alone gets 0.15 ns more hold margin on these (as quartus/snes_sdram): without it
+    # its padding left one SPC700 -> last_wd path 41 ps short at the fast 0 C corner
+    if {$::quartus(nameofexecutable) eq "quartus_fit"} {
+        set_clock_uncertainty -hold -add -from $clk_sys -to $clk_mem 0.15
+    }
 }
 # The SNES CPU's live address (SCPU) reaches the ROM address only through SA1.vhd's
 # SNES_ROM_SEL = SNES_ROM_ACCESS(SNES_A) and not WINDOW: the CPU address changes only at a

@@ -51,10 +51,41 @@ Goal: Yoshi's Island (GSU-2) and Star Fox (GSU-1) in the same core as the SA-1 g
      `~SYSCLKR_CE & ROM_OE_N`, so soft refreshes only start in clocks after which no GSU access
      can begin. At 21.4 MHz (GSU-2, Yoshi's Island) a fetch has 3 clocks, a cache fill 4, a
      LOAD 6.
-- Fits with the SA-1: 87 % of the ALMs (v6: 79 %), 300 / 308 M10K. Timing: the first builds
-  missed by 0.4-0.6 ns on clk_mem, on paths into the ARAM write forwarding (`upd_d`, from the
-  write queue or the SPC700's write data), i.e. placement at this fill level, not the GSU;
-  fitter seed sweep under way (see "v7 build").
+- Fits with the SA-1: 87 % of the ALMs (v6: 79 %), 300 / 308 M10K. **Timing is not met**
+  ("v7 build"), so there is also a Super FX-only build, `quartus/snes_gsu`.
+
+### v7 build (24 Oct)
+
+v6 met timing with +0.5 ns on clk_mem. With the GSU the fill level costs ~1 ns on the paths
+into the controller's ARAM sample logic (`sdram_rom8.sv`, everything decided at k = 2: the
+S-DSP/SPC700's address and data from clk_sys, the write queue and forwarding compares). Tried:
+- fitter seeds 3 and 4 (worse: -0.54 to -0.86 ns; note that `quartus_fit --seed` rewrites the
+  .qsf, flattening the sourced file lists into it: restore it from git afterwards);
+- `OPTIMIZATION_MODE "AGGRESSIVE PERFORMANCE"`: -0.25 ns, but with the changes below it
+  overflowed the LABs (1887 of 1848), so it's back to HIGH PERFORMANCE EFFORT;
+- clk_mem lagging clk_sys by 333 ps (`SDRAM_MEM_LAG_PS`; the SDC counts one more edge for
+  clk_sys -> clk_mem setups when there is a lag), a multicycle 2 from the ARAM write queue to
+  upd/upd_d/upd_tag (they load only at k = 2; the queue changes only at k = 0 and 2), and
+  `rom_loader`'s end-of-transfer compares registered (they became critical).
+Result (`out/q-snes_load.cor`, commit d388532): **clk_mem -0.48 ns at slow 85 °C, -0.23 ns at
+slow 0 °C**, everything else met, pins checked. The remaining paths run from the ARAM sample's
+own state and the SPC700 into the write queue registers. At room temperature and typical
+silicon this is likely to work, but it isn't guaranteed. The real fix is to pipeline the ARAM
+sample (register the port at k = 2, decide at k = 3), which needs care: a read completion at k = 3
+must then also see a write to its address sampled in the same clock (today `a_stale`, set at
+k = 2, covers that).
+
+`quartus/snes_gsu` (`make out/q-snes_gsu.cor`): the same top with `USE_SA1 = 0` (sources,
+pins, SDRAM settings and SDC all from `quartus/snes_load`), to test the Super FX without the
+timing doubt. SA-1 carts don't run on it.
+
+Known issue: in Yoshi's Island the ARAM port still has ~2 reads per 6 s that start after the
+third k = 0 since their request (`n_ar_late`; Star Fox and the SA-1 games 0). In both cases
+the ROM sequencer was 6 cycles into back-to-back reads when the ARAM could have started, and
+the controller starts ARAM operations only with the ROM side idle or exactly 3 cycles into a
+read. Effect at worst: an S-DSP/SPC700 read gets the previous byte. Allowing a start at cnt 6
+looks safe for the DQ bus but changes the controller's command schedule; left for after the
+console test.
 
 ### v7 simulation
 

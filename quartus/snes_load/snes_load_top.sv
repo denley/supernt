@@ -56,6 +56,7 @@ module top #(
     parameter AUD_FRAMING = 0,      // I2S, confirmed
     parameter BSRAM_AW   = 16,      // BW-RAM / SRAM in block RAM: 64 KB (v2; ARAM is in SDRAM)
     parameter USE_GSU    = 1,       // v7: Super FX (GSU) carts too (ROM_TYPE 7x; GSU RAM = the BSRAM)
+    parameter USE_SA1    = 1,       // 0: no SA-1 (quartus/snes_gsu, the Super FX test build)
     parameter TMPL_HEX   = "../../build/snes_load/diag.hex",
     parameter FONT_HEX   = "../../build/hwtest/font.hex",
     // simulation shortcuts (the real values are the defaults)
@@ -279,7 +280,7 @@ module top #(
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [1:0]  clr_sync = 2'b00;
     always @(posedge clk_sys) clr_sync <= {clr_sync[0], ram_clear};
-    snes_sdram_core #(.BSRAM_AW(BSRAM_AW), .ARAM_EXT(1), .USE_GSU(USE_GSU)) snes (
+    snes_sdram_core #(.BSRAM_AW(BSRAM_AW), .ARAM_EXT(1), .USE_GSU(USE_GSU), .USE_SA1(USE_SA1)) snes (
         .clk_sys(clk_sys), .reset(core_reset), .rom_type(rom_type), .rom_mask(rom_mask),
         .ram_mask(ram_mask),
         .rom_addr(rom_addr), .rom_word(rom_word), .rom_q(rom_q), .rom_oe_n(rom_oe_n),

@@ -22,7 +22,8 @@
 module snes_sdram_core #(
     parameter        BSRAM_AW = 11,          // BW-RAM bytes = 2^BSRAM_AW
     parameter        ARAM_EXT = 0,           // 1: ARAM outside (aram_* ports, quartus/snes_load v2)
-    parameter        USE_GSU  = 0            // 1: Super FX (GSU) too (quartus/snes_load v7)
+    parameter        USE_GSU  = 0,           // 1: Super FX (GSU) too (quartus/snes_load v7)
+    parameter        USE_SA1  = 1            // 0: no SA-1 (quartus/snes_gsu: the Super FX alone)
 ) (
     input  wire        clk_sys,      // SNES master clock, 21.442 MHz (MCLK = ACLK)
     input  wire        reset,        // synchronous to clk_sys, active high
@@ -94,7 +95,7 @@ module snes_sdram_core #(
     assign joy_clk = joy1_clk | joy2_clk;
 
     main #(
-        .USE_CX4(1'b0), .USE_SDD1(1'b0), .USE_GSU(USE_GSU[0]), .USE_SA1(1'b1), .USE_DSPn(1'b0),
+        .USE_CX4(1'b0), .USE_SDD1(1'b0), .USE_GSU(USE_GSU[0]), .USE_SA1(USE_SA1[0]), .USE_DSPn(1'b0),
         .USE_SPC7110(1'b0), .USE_BSX(1'b0), .USE_MSU(1'b0), .USE_SS(1'b0), .USE_SUFAMI(1'b0)
     ) main (
         .RESET_N(reset_n),

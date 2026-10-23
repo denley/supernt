@@ -1,0 +1,1 @@
+../snes_load/pins.tcl

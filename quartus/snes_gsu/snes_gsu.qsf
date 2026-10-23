@@ -1,0 +1,40 @@
+# quartus/snes_gsu: quartus/snes_load (v7) without the SA-1, built as out/q-snes_gsu.cor. Same
+# sources, pins, SDRAM settings and constraints (all sourced from ../snes_load); SA-1 carts don't
+# run on it. Made as the Super FX test build when the SA-1 + GSU core missed clk_mem timing by
+# 0.2-0.5 ns at the slow corners.
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CEBA4F23C8
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name SDC_FILE snes_gsu.sdc
+source ../snes_load/files.tcl
+source ../common/supernt.tcl
+source ../snes_load/pins.tcl
+source ../snes_load/sdram_params.tcl
+# The Super FX test build: quartus/snes_load without the SA-1 (notes/snes-load.md, "v7 in short")
+set_parameter -name USE_SA1 0
+# As quartus/snes_sdram (settings from agg23's Pocket build of the same core).
+set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
+set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
+set_global_assignment -name SAFE_STATE_MACHINE ON
+set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
+set_global_assignment -name SEED 2
+set_global_assignment -name OPTIMIZE_HOLD_TIMING "ALL PATHS"
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch1[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch2[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch3[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s0
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s1
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to s2
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_cs_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_ras_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_cas_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_we_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_a[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_ba[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sd_dq[*]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to sd_dq[*]
+# read data: chip B's byte (DQ 15-8) into I/O-cell input registers (`cap`)
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to sd_dq[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to sdram_rom8:sdram|cap[*]
+
+set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"

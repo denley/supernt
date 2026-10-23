@@ -27,7 +27,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE $U/cheatcodes.sv
 set_global_assignment -name VERILOG_FILE $U/main.v
 
 # Ours: the core wrapper from quartus/snes_sdram, video and audio PLL from quartus/snes.
-set_global_assignment -name VERILOG_FILE snes_load_pll.v
+set_global_assignment -name VERILOG_FILE ../snes_load/snes_load_pll.v
 set_global_assignment -name VERILOG_FILE ../snes/audio_pll.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/i2s_out.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/sdram_rom8.sv
@@ -37,4 +37,4 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../common/pad_poll.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/overlay.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../snes_sdram/snes_sdram_core.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../snes/snes_video.sv
-set_global_assignment -name SYSTEMVERILOG_FILE snes_load_top.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../snes_load/snes_load_top.sv
