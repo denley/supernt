@@ -250,11 +250,14 @@ module rom_loader #(
     wire       got_all = info_ok && rom_size >= info_size && info_size != 32'd0 && n_file > ROM_OFF;
     wire       idle_long = ms - t_last >= DONE_MS;
     // registered (v7): the 32-bit compares feeding the end of the transfer were critical paths;
-    // the decision comes a clock later (a file byte in that clock still wins: b_go is first)
+    // the decision comes a clock later (a file byte in that clock still wins: b_go is first).
+    // Both are cleared by every file byte: otherwise the first byte of a file would meet the
+    // values from before it (idle_long true after the long wait, got_all from the last file)
+    // and end the transfer at once.
     reg        got_all_q = 1'b0, idle_long_q = 1'b0;
     always @(posedge clk) begin
-        got_all_q <= got_all;
-        idle_long_q <= idle_long;
+        got_all_q <= got_all && !b_go;
+        idle_long_q <= idle_long && !b_go;
     end
     always @(posedge clk) begin
         push <= 1'b0;
