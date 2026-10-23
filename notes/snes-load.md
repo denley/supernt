@@ -114,8 +114,8 @@ phase C in `make sim-sdram-rom8`: byte reads, addresses held 1-6 clk_sys, reads 
   got lo_sel set again by the old read's copy to cap_lo (rd2[CPY] came at the new read's
   cnt = 1, after its clear), so rom_q[7:0], the GSU's lane, showed the old word until the next
   read (phase C: 336 wrong bytes). The ACT now drops the pending copy (the core has left that
-  word). Yoshi's/Star Fox's traffic rarely does this (the sims' ROM histograms had 1 and 6
-  addresses left before their byte).
+  word). Yoshi's/Star Fox's traffic apparently never does this (their ROM histograms are the
+  same with the fix). Star Fox, 460 frames with both fixes: PASS, ARAM 0 late.
 
 ### v7 simulation
 
@@ -132,8 +132,9 @@ in for Yoshi's Island, ~18 for Star Fox):
 - **Star Fox** (GSU-1, 10.7 MHz, with the refresh hint): the starfield with "NINTENDO PRESENTS"
   at frame ~320, as Mesen2's frame 300 (`photos/sim-starfox-title-2026-10-24.png`); long run
   (460 frames): the GSU-drawn 3D Arwings of the intro at frame 459
-  (`photos/sim-starfox-arwings-2026-10-24.png`), PASS, ARAM 0 late; the ROM histogram had 6
-  addresses left before their byte (see the cap_lo fix below).
+  (`photos/sim-starfox-arwings-2026-10-24.png`), PASS, ARAM 0 late; the ROM histogram has 6
+  addresses left before their byte (5 after 2 clk_sys, 1 at once), the same with the case III /
+  cap_lo controller: short-lived addresses the core moved past, not a controller fault.
 - **Yoshi's Island** long run (700 frames): "A long, long time ago..." under the logo at frame
   ~620 (`photos/sim-yoshi-story-2026-10-24.png`).
 - Before the ROM address hold, Yoshi's Island stayed black: the GSU never finished its first job.
