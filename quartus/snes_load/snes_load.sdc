@@ -104,7 +104,7 @@ set_false_path -to [get_ports {sd_dqm_b}]
 
 # Mapper settings from the loader (rom_loader.sv) change only while the core is held in reset
 # (and ROM reads are off): static for timing.
-set_false_path -from [get_registers {rom_loader:ld|rom_type[*] rom_loader:ld|rom_mask[*] rom_loader:ld|ram_mask[*] rom_loader:ld|sa1}]
+set_false_path -from [get_registers {rom_loader:ld|rom_type[*] rom_loader:ld|rom_mask[*] rom_loader:ld|ram_mask[*] rom_loader:ld|sa1 rom_loader:ld|gsu}]
 
 # PIC32 link: asynchronous strobes and data, sampled through 2-FF synchronisers (link_ui.sv); the
 # PIC reads the data bus long after it is driven (>= 3 link-clock cycles in the stock core).

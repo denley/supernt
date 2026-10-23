@@ -17,7 +17,65 @@ the browser, but neither did DOWN+SELECT, and its log showed why: **while a game
 reads the pad registers over the link** (0x2000/0x2001 every ~33 ms) and wakes on SELECT there;
 it doesn't watch the controller lines. v5 (console run 23 Oct) passed DOWN+SELECT through to it
 during games: nothing woke it (its log: 0x2000 read as 0x24 279 times). v6 (this version, "v6
-in short") sends it SELECT alone instead: **works on the console** (23 Oct).
+in short") sends it SELECT alone instead: **works on the console** (23 Oct). v7 ("v7 in short")
+adds the **Super FX (GSU)** next to the SA-1; not yet run on the console.
+
+## v7 in short (23-24 Oct 2026): Super FX
+
+Goal: Yoshi's Island (GSU-2) and Star Fox (GSU-1) in the same core as the SA-1 games.
+
+- `USE_GSU = 1` (top parameter, `snes_sdram_core.sv`): main.v's GSUMap. The GSU reads the ROM a
+  byte at a time (ROM_WORD 0, lane 0), as the 8-bit controller delivers it, and uses the BSRAM
+  port for its RAM: the existing 64 KB block-RAM BSRAM is the GSU RAM (Yoshi's Island and Star
+  Fox have 32 KB; kept across reloads like the other save RAMs).
+- `rom_loader.sv`: GSU carts (map 20, type 13/14/15/1A) -> ROM_TYPE 7x, RAM mask from ROM byte
+  0x7FBD (FF = Star Fox's 32 KB; at most 64 KB), as the Pocket's `rom_parser.sv`. The status
+  page shows "LoROM + SUPER FX". `tools/rom2spc.py` reports it too; `make load-spcs` builds
+  `yoshi.spc` and `starfox.spc`.
+- **GSU.vhd is patched** (`quartus/snes_load/gsu_rom_hold.patch` -> `build/snes_load/GSU.vhd`):
+  1. **ROM address hold.** The GSU's ROM address mux falls back to its program counter
+     (PBR:R15) whenever it isn't reading ROM, i.e. whenever it runs from its cache. That changes
+     almost every clock, and our controller starts an SDRAM read for every new address: the
+     ROM sequencer never idles, real fetches wait, and the S-DSP's ARAM accesses starve. In
+     simulation Yoshi's Island hung after starting the GSU (frame ~74 of the game; Mesen2 has
+     the GSU done by frame 77), with 20 001 ROM addresses held 4 clocks whose byte never
+     arrived and 2 102 late ARAM reads (`TB_ROMLAT=1` histogram). Patched: the address only
+     follows the GSU in its LOAD/FETCH/CACHE states (and to the SNES CPU's address when the GSU
+     doesn't own the ROM), otherwise it holds the last value. Then every byte arrives within 3
+     clocks, no address goes unserved, 1 late ARAM read, and the game shows "Nintendo
+     Presents" as in Mesen2.
+  2. **Refresh hint.** ROM_RD_N (only MiSTer's SDRAM controller used it) becomes "this clock
+     ends on a GSU clock-enable edge" (FLAG_GO and CLK_CE). At 10.7 MHz (GSU-1) a FETCH takes its
+     byte at the second enable edge after the address change: 2 clk_sys, which our reads meet
+     (latency 2) unless a refresh is in the way. The top's `rfsh_ok` for GSU carts is
+     `~SYSCLKR_CE & ROM_OE_N`, so soft refreshes only start in clocks after which no GSU access
+     can begin. At 21.4 MHz (GSU-2, Yoshi's Island) a fetch has 3 clocks, a cache fill 4, a
+     LOAD 6.
+- Fits with the SA-1: 87 % of the ALMs (v6: 79 %), 300 / 308 M10K. Timing: the first builds
+  missed by 0.4-0.6 ns on clk_mem, on paths into the ARAM write forwarding (`upd_d`, from the
+  write queue or the SPC700's write data), i.e. placement at this fill level, not the GSU;
+  fitter seed sweep under way (see "v7 build").
+
+### v7 simulation
+
+`make sim-snes-gsu-yoshi` / `sim-snes-gsu-starfox` (Verilator, own work dir
+`SNES_GSU_SIM` = `~/scratch/snes-gsu/sim`; GSU.vhd goes through
+`quartus/snes_load/sim/gsu_split.py`, which splits the GSU's three processes that have both a
+`falling_edge` and a `rising_edge` branch into one process per edge: GHDL's synthesis rejects
+the combined form, and no signal is assigned on both edges, so the split is equivalent).
+Results (24 Oct, frames numbered from the start of the simulation; the game starts ~30 frames
+in for Yoshi's Island, ~18 for Star Fox):
+- **Yoshi's Island**: "Nintendo Presents" from frame ~110, then the Super FX-drawn stitched
+  Nintendo logo at frame ~330, both as in Mesen2 (its frames 80-260 and 300)
+  (`photos/sim-yoshi-logo-2026-10-24.png`). 0 SDRAM model errors, ROM bytes within 3 clocks.
+- **Star Fox** (GSU-1, 10.7 MHz, with the refresh hint): the starfield with "NINTENDO PRESENTS"
+  at frame ~320, as Mesen2's frame 300 (`photos/sim-starfox-title-2026-10-24.png`).
+- Before the ROM address hold, Yoshi's Island stayed black: the GSU never finished its first job.
+
+`TB_ROMLAT=1` adds the ROM byte latency histogram (clk_sys edges from an address change to its
+byte on rom_q[7:0], and addresses dropped before their byte came). Reference frames from
+Mesen2 (headless test runner; see notes/snes-quartus.md for the setup; Lua io/os access needs
+`{"Debug":{"ScriptWindow":{"AllowIoOsAccess":true}}}` in its settings.json now).
 
 ## v6 in short (23 Oct 2026)
 

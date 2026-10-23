@@ -1,6 +1,6 @@
 --- GSU.vhd
 +++ GSU.vhd
-@@ -220,6 +220,7 @@
+@@ -220,9 +220,11 @@
  	signal SNES_ROM_ADDR 	: std_logic_vector(23 downto 0);
  	signal SNES_RAM_A 		: std_logic_vector(16 downto 0);
  	signal INT_ROM_A 			: std_logic_vector(23 downto 0);
@@ -8,10 +8,45 @@
  	signal SNES_CACHE_ADDR 	: std_logic_vector(8 downto 0);
  --	signal GSU_ROM_RD 		: std_logic;
  	signal ROM_RD_CNT 		: unsigned(1 downto 0);
-@@ -1260,10 +1261,21 @@
++	signal ROM_RD_N_MISTER 	: std_logic;	-- Super Nt: the original ROM_RD_N (unused)
+ 	
+ 	signal GO_CNT 				: unsigned(15 downto 0);
+ 
+@@ -1237,20 +1239,20 @@
+ 	process(CLK, RST_N)
+ 	begin
+ 		if RST_N = '0' then
+-			ROM_RD_N <= '1';
++			ROM_RD_N_MISTER <= '1';
+ 			ROM_RD_CNT <= (others => '0');
+ 		elsif rising_edge(CLK) then
+-			ROM_RD_N <= '1';
++			ROM_RD_N_MISTER <= '1';
+ 			if GSU_ROM_ACCESS = '0' then
+ 				if SYSCLKR_CE = '1' or SYSCLKF_CE = '1' then
+-					ROM_RD_N <= '0';
++					ROM_RD_N_MISTER <= '0';
+ 					ROM_RD_CNT <= (others => '0');
+ 				end if;
+ 			else
+ 				ROM_RD_CNT <= ROM_RD_CNT + 1;
+ 				if ROM_RD_CNT = 1 then
+ 					ROM_RD_CNT <= (others => '0');
+-					ROM_RD_N <= '0';
++					ROM_RD_N_MISTER <= '0';
+ 				end if;
+ 			end if;
+ 			
+@@ -1260,10 +1262,27 @@
  		end if;
  	end process;
  	
++	-- Super Nt (quartus/snes_load/gsu_rom_hold.patch): ROM_RD_N tells the SDRAM controller when
++	-- a refresh can't delay a GSU ROM read: 0 in a clock whose closing edge is a GSU clock enable
++	-- edge (a ROM access may start there), 1 otherwise. In 10.7 MHz mode (GSU-1, Star Fox) a fetch
++	-- takes its byte two clocks after the address changes, too soon for a read behind a refresh.
++	ROM_RD_N <= not (FLAG_GO and CLK_CE);
++
 +	-- Super Nt (quartus/snes_load/gsu_rom_hold.patch): the ROM address only follows the GSU
 +	-- while it reads ROM (load, fetch, cache fill); otherwise it holds the last one, so the
 +	-- program counter running through the cache doesn't start an SDRAM read every cycle.

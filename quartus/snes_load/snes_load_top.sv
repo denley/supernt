@@ -189,8 +189,11 @@ module top #(
     // Refresh slots (sdram_rom8.sv: no critical read can start at the next clk_sys edge): SA-1
     // carts as quartus/snes_sdram (the SA-1's address changes after a CLK_CE = ROM_OE_N cycle, the
     // SNES CPU's window ends with SYSCLKF_CE); the Lo/HiROM mapper (DSP_LHRomMap.vhd) registers
-    // the ROM address on SYSCLKR_CE only, and its CPU takes the data >= 3 clk_sys later.
-    wire rfsh_ok = ld_sa1 ? (~rom_oe_n & ~sysclkf_ce) : ~sysclkr_ce;
+    // the ROM address on SYSCLKR_CE only, and its CPU takes the data >= 3 clk_sys later. GSU
+    // carts (v7) the same, and not in a clock whose closing edge is a GSU clock enable edge
+    // (ROM_OE_N low then, gsu_rom_hold.patch): at 10.7 MHz a GSU fetch takes its byte two clocks
+    // after the address change, too soon for a read behind a refresh.
+    wire rfsh_ok = ld_sa1 ? (~rom_oe_n & ~sysclkf_ce) : ld_gsu ? (~sysclkr_ce & rom_oe_n) : ~sysclkr_ce;
     sdram_rom8 #(.CAPTURE_HALF(CAPTURE_HALF), .INIT_CYCLES(INIT_CYCLES)) sdram (
         .clk(clk_mem), .clk_sd(clk_sd), .clk_cap(clk_cap), .reset(mem_reset), .ready(sd_ready),
         .sys_tog(sys_tog),

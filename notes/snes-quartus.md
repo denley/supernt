@@ -202,8 +202,10 @@ the file's header comment. In short:
   shows the final result.
 - WRAM, for the simulation: `$7E:0100+k` = result of test k (0 pending, 1 pass, 2 fail),
   `$7E:00FF` = 7 tests, `$7E:00FE` = `$A5` when all are evaluated, `$7E:00FC–FD` frame counter.
-- **Mesen2** (run headless: `DOTNET_ROOT=~/.dotnet`, a separate `HOME` with `{}` as
-  `settings.json`, `--testrunner` with a Lua script, `--Snes.DisableFrameSkipping=true`): all 7
+- **Mesen2** (run headless: `DOTNET_ROOT=~/.dotnet`, a separate `HOME` whose
+  `.config/Mesen2/settings.json` is `{"Debug":{"ScriptWindow":{"AllowIoOsAccess":true}}}`
+  (with `{}`, as first used, a script that touches `io`/`os` now makes it exit 255 at once;
+  24 Oct), `--testrunner` with a Lua script, `--Snes.DisableFrameSkipping=true`): all 7
   tests pass, with power-on RAM random, all zeros and all ones; pixel positions match the layout.
   Patched copies that never release the SA-1 or expect a wrong product turn the right bands
   red. Script and screenshots: `~/scratch/snes-quartus/testrom/`.
