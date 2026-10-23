@@ -17,7 +17,7 @@ the browser, but neither did DOWN+SELECT, and its log showed why: **while a game
 reads the pad registers over the link** (0x2000/0x2001 every ~33 ms) and wakes on SELECT there;
 it doesn't watch the controller lines. v5 (console run 23 Oct) passed DOWN+SELECT through to it
 during games: nothing woke it (its log: 0x2000 read as 0x24 279 times). v6 (this version, "v6
-in short") sends it SELECT alone instead; the test is "Console test (v6)".
+in short") sends it SELECT alone instead: **works on the console** (23 Oct).
 
 ## v6 in short (23 Oct 2026)
 

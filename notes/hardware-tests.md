@@ -489,3 +489,5 @@ chord file was run (results below); the link part showed why nothing else could 
 - 23 Oct 2026, snes_load **v6 built** (seed 2, timing met +0.509 ns): a 300 ms SELECT-alone press
   for the PIC on DOWN+SELECT during games. Installed on the card as `14-q-snes_load`; v5 kept
   as `TESTCORES/93-q-snes_load-v5.cor`.
+- 23 Oct 2026, `14-q-snes_load` **v6** on the console: **works** (user): DOWN+SELECT opens the
+  PIC's browser from a game, SELECT alone stays with the game.

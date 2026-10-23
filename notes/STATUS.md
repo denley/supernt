@@ -25,16 +25,15 @@ How it's used:
 - **DOWN+SELECT** (the JB menu combo; the PIC watches the pad lines itself) brings the browser
   back to load another game without a power cycle. **L+R+SELECT** shows our status/log page.
   In v2/v3, SELECT alone did that too (the PIC reacts to SELECT in our pad registers); v6
-  should fix it (below).
+  fixed it (below).
 - After the transfer the core checks the ROM in SDRAM against the file's CRC-32 and shows
   "INFO CRC: OK" before booting.
 
 **Player 2 works** (v3, 23 Oct: port 2's data line is D6, found by a pin scan; v4 reads it
 directly). While a game runs the PIC polls our pad registers over the link and wakes on SELECT
-(v4 run) but only on SELECT alone (v5 run: DOWN+SELECT held didn't wake it). **v6** (built 23
-Oct, not yet on the console; test: `notes/snes-load.md`, "Console test (v6)") answers 0 during
-games and sends it a short SELECT-alone press when DOWN+SELECT is pressed, so SELECT alone is the
-game's.
+(v4 run) but only on SELECT alone (v5 run: DOWN+SELECT held didn't wake it). **v6 works on the
+console** (23 Oct): it answers 0 during games and sends the PIC a short SELECT-alone press when
+DOWN+SELECT is pressed, so DOWN+SELECT opens the browser and SELECT alone is the game's.
 
 Limits now: saves are kept only while powered and only for the last game loaded (the SPC
 player context has no way to write files to SD); 64 KB save RAM, ROMs up to 6 MB; no Super FX,
