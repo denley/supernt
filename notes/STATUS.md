@@ -93,5 +93,7 @@ Card" loader, BIOS files are on the card in `/BIOS`).
   runs in every Quartus build.
 - Quartus ignores initial values written in ANSI port declarations: use internal registers.
 - Long Quartus builds and sims run in the background; the repo has no remote (local commits).
+  Work done on a branch/worktree can go straight into `main` (fast-forward) without asking
+  (Denley, 23 Oct).
 - Throwaway data: `~/scratch/cap` (~17 GB of recordings), `~/scratch/hwtest-videos`, decode
   scripts in `~/scratch/*`; all safe to delete.
