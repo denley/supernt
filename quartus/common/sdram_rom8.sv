@@ -555,6 +555,11 @@ module sdram_rom8 #(
             ar_q <= upd_d; tag <= upd_tag; tag_ok <= 1'b1;
         end
         if (k_now == 3'd0 && rq_need && rq_age != 3'd7) rq_age <= rq_age + 3'd1;
+        // synthesis translate_off
+        if (k_now == 3'd0 && rq_need && rq_age >= 3'd2 && !a_start)
+            $display("sdram_rom8: ARAM read %h waiting (age %0d): st %0d cnt %0d a_on %0d a_op %0d a_slot %0d rf_limit %0d wq_n %0d at %0t",
+                     rq_addr, rq_age, st, cnt, a_on, a_op, a_slot, rf_limit, wq_n, $time);
+        // synthesis translate_on
         // operations
         if (a_start) begin
             a_on <= 1'b1;
