@@ -12,10 +12,21 @@ Kirby Super Star; notes/hardware-tests.md). v2 (commit dd820dc) closes v1's gaps
 to the player's menu, 64 KB of save RAM (Super Mario RPG, Kirby's Dream Land 3), keeping saves
 across reloads, a full PIC link log; **works on the console** (23 Oct, DOWN+SELECT back to the
 browser). v3 (one console run, 23 Oct) found port 2's data pin (D6: **player 2 works**) but its
-SELECT fix didn't work. v4 (this version, "v4 in short" below) reads D6 directly and keeps a PIC
-woken by SELECT alone hidden; the test is "Console test (v4)".
+SELECT fix didn't work. v4 (console run 23 Oct) read D6 directly; SELECT alone no longer opened
+the browser, but neither did DOWN+SELECT, and its log showed why: **while a game runs the PIC
+reads the pad registers over the link** (0x2000/0x2001 every ~33 ms) and wakes on SELECT there;
+it doesn't watch the controller lines. v5 (this version, "v5 in short") uses that; the test is
+"Console test (v5)".
 
-## v4 in short (23 Oct 2026)
+## v5 in short (23 Oct 2026)
+
+- During a game the pad registers read 0 **except while DOWN+SELECT is held**: the PIC sees
+  DOWN+SELECT and wakes, SELECT alone and L+R+SELECT (our pages) never reach it. The keys' menu
+  view (L+R+SELECT+START) no longer passes buttons to the PIC either. Everything else as v4 (a
+  PIC woken without DOWN+SELECT would still stay hidden; when its screen comes up it gets 0s
+  until all buttons are released).
+
+## v4 in short (23 Oct 2026, superseded by v5)
 
 - **Player 2** on D6 (`pad_poll.sv` reads it in the same poll as T12; LATCH and CLOCK are shared),
   a second virtual 4021 for the SNES (`snes_sdram_core.sv` has separate port clocks and a
@@ -370,6 +381,13 @@ v4: 87 user I/Os: v2's 86 + `pad_d6` (port 2 data, input, weak pull-up as in v3)
 
 ## Simulation
 
+**v5 (23 Oct).** `make sim-snes-load`: **PASS**. The PIC stand-in now does what the v4 console log
+showed: while "playing" it reads 0x2000/0x2001 every 33 ms and wakes when 0x2000 has SELECT (the
+v4 model watched the lines instead, which is why v4's sim passed and the console didn't). The
+keys' menu view at +40/+120, L+R+SELECT x 3 and SELECT alone at +362 woke it 0 times (the game
+got SELECT); DOWN+SELECT at +380 woke it at +417 ms, the core showed it, no BACK TO GAME from
+the held SELECT, second file loaded and booted, SA-1 tests pass; port 2 as v4.
+
 **v4 (23 Oct).** `make sim-snes-load` (62 frames): **PASS**. The PIC stand-in wakes on SELECT in
 two polls of any waveform and treats SELECT in its browser (pad registers) as BACK TO GAME.
 The keys' menu combination at +40 ms woke it, and the core kept it hidden (the menu view
@@ -477,6 +495,12 @@ sets up the HDMI transmitter), and not again at the boot.
 
 ## Build results
 
+**v5 (23 Oct 2026):** seed 2 (`.cor` sha1 12ccded2c274…): 14,733 / 18,480 ALMs (80 %), 299 / 308
+RAM blocks, **timing met** (worst setup +0.457 ns, hold +0.090 ns), 87 user I/Os. Seed 1 missed
+by 0.45 ns (seed 3: +0.212). The 107 MHz SDRAM controller's slack swings by about ±0.5 ns from
+seed to seed with nearly the same design (v4 seed 1 +0.54, v5 seed 1 -0.45), so a new build
+that misses should first get another seed or two.
+
 **v4 (23 Oct 2026):** Quartus 25.1 Lite, seed 1: `.cor` sha1 1055bef799a5…. 14,694 / 18,480 ALMs
 (80 %), 14,646 registers, 299 / 308 RAM blocks, 19 DSP blocks. **Timing met at all four corners**
 (worst setup +0.542 ns, hold +0.122 ns). Pin check: 87 user I/Os (v2's 86 + D6, input).
@@ -515,6 +539,11 @@ SDC), then the log's 8-entry compare and the ARAM forward counter by 0.5 ns (reg
   solved it with room to spare. A Quartus trap on the way: two PLL outputs with the same
   frequency and phase are merged, and the SDC's `*[2].*` clock name then matches nothing (all
   SDRAM I/O constraints silently dropped; warning 332174) — hence the 1-step SDRAM clock lead.
+
+## Console test (v5): one run
+
+As v4's below (v4 ran on 23 Oct: SELECT alone stayed with the game, but DOWN+SELECT didn't open
+the browser either; notes/hardware-tests.md).
 
 ## Console test (v4): one run
 

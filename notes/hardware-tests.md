@@ -470,3 +470,12 @@ chord file was run (results below); the link part showed why nothing else could 
   DOWN+SELECT stays hidden behind the game; timing met (+0.542 ns), 87 user I/Os. Test:
   notes/snes-load.md, "Console test (v4)". Installed on the card as `14-q-snes_load` (and
   spc.cor); v2 and v3 kept as `TESTCORES/90-q-snes_load-v2.cor`, `91-q-snes_load-v3.cor`.
+- 23 Oct 2026, `14-q-snes_load` **v4** on the console (recording
+  `~/scratch/cap/rec-20261023-183420.mkv`): Kirby Super Star, then Super Mario RPG after a power
+  cycle. SELECT alone no longer opened the browser, but **DOWN+SELECT didn't either** (user had to
+  power cycle to change games). The status page during Kirby (T 0x1094B) showed why: `last T`
+  0x1093B, `UI` 0x208E (before the boot), `pad rd` 0x20B4, newest log entries `20000000` and
+  `20010000`, 2 bytes, 0x70F repeats from T 0x208E to 0x1093B: **the PIC polls the pad registers
+  over the link while a game runs** (notes/pic-link.md, "Correction"), and v4 answered 0.
+- 23 Oct 2026, snes_load **v5 built** (seed 2, timing met +0.457 ns): pad registers pass
+  DOWN+SELECT during games (else 0).

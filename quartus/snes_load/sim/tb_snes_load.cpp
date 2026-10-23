@@ -20,17 +20,15 @@
 //   after it   what the console's PIC did after a file (hardware-tests.md, 23 Oct): 8 bytes at
 //              0x1018_0F6C, 0x1000_D129 = 00, 0x0000_00FE = 06, 0x1000_0102 = 00, 0x1000_0010 =
 //              00, 20 ms later 0x1000_0021 = F8, one more UI loop, then nothing on the link;
-//   playing    the PIC watches the controller lines itself, as the console's did (v2/v3 runs:
-//              SELECT alone woke it, with either poll waveform): two polls in a row with SELECT
-//              held wake it: it redraws its browser screen and runs the UI loop again. In its
-//              browser after a game, SELECT (from the pad registers) is BACK TO GAME: silent
-//              again.
+//   playing    as the console's PIC (v4 run's log): it reads the pad registers 0x2000 and 0x2001
+//              (2 bytes each) every 33 ms and wakes when 0x2000 has SELECT: it redraws its
+//              browser screen and runs the UI loop again. In its browser after a game, SELECT
+//              (a new press) is BACK TO GAME: playing again.
 // The "user" (pad), times after the first boot: L+R+SELECT+START at +40 and +120 ms (menu view
-// by the keys on, off; the first wakes the PIC, which the core keeps hidden; the second, with
-// the menu view up, is the PIC's BACK TO GAME), L+R+SELECT at +200, +260, +320 (status page,
-// log view, off; the PIC wakes again and stays hidden: the game is shown, the PIC reads 0s),
-// SELECT alone at +362 (the game gets it), DOWN+SELECT at +380 (the core shows the PIC's screen
-// and gives it the pad only after the release), DOWN at +480 (the second file), Y at +530: the
+// by the keys on, off), L+R+SELECT at +200, +260, +320 (status page, log view, off), SELECT
+// alone at +362 (the game gets it): none of these may wake the PIC (its pad registers read 0
+// in the game); DOWN+SELECT at +380 (the PIC sees it and wakes, the core shows its screen and
+// gives it the pad only after the release), DOWN at +480 (the second file), Y at +530: the
 // second file (TB_FILE2, default the same ROM under another name: save RAM kept) is loaded and
 // booted; the SA-1 tests must pass again.
 // Port 2 (v4): a second 4021 pad on pad_d6 (LATCH/CLOCK shared); A held at +250-290 ms after the
@@ -207,7 +205,8 @@ int main(int argc, char **argv) {
     int nfile = 0, wake_polls = 0;
     double woke_at = -1;
     double t_boot1 = -1;
-    std::function<void()> ui_loop, poll;
+    std::function<void()> ui_loop, poll, play_loop;
+    uint8_t play_pad = 0;
     std::vector<uint8_t> scr;
     auto send_screen = [&]() { screen(scr); pic.block(0x10180000, scr.data(), scr.size()); };
     poll = [&]() {
@@ -257,7 +256,7 @@ int main(int argc, char **argv) {
             pic.byte(0x1000D120, 0x01);
             pic.read(0x20000000, 2, [&](uint8_t v) { (void)v; });
             pic.read(0x20010000, 2, [&](uint8_t v) { (void)v; });
-            pic.call([&]() { playing = true; wake_polls = 0; });
+            pic.call([&]() { playing = true; wake_polls = 0; pic.call(play_loop); });
         });
     };
     auto wake = [&]() {                     // SELECT seen on the controller lines
@@ -266,6 +265,17 @@ int main(int argc, char **argv) {
         skip_edge = true;                   // buttons held while it wakes aren't new presses
         send_screen();
         pic.call(ui_loop);
+    };
+    play_loop = [&]() {                     // "playing": pad registers every 33 ms
+        if (!scen) return;
+        pic.read(0x20000000, 2, [&](uint8_t v) { play_pad = v; });
+        pic.read(0x20010000, 2, [&](uint8_t v) { (void)v; });
+        pic.call([&]() {
+            if (!playing) return;
+            if (play_pad & 0x04) { wake(); return; }
+            pic.wait(33e6);
+            pic.call(play_loop);
+        });
     };
     ui_loop = [&]() {
         pic.byte(0x1000D120, 0x01);
@@ -287,8 +297,9 @@ int main(int argc, char **argv) {
                 !r->tb__DOT__dut__DOT__menu_t)
                 pad_to_hidden++;                 // buttons reached a PIC the core keeps hidden
             if (scen && booted && woke && !sent2 && !sending && (pressed & 0x04)) {
-                backs++;                         // BACK TO GAME: silent again
+                backs++;                         // BACK TO GAME: playing again
                 playing = true; wake_polls = 0;
+                pic.call(play_loop);
                 return;
             }
             if (!scen && booted && !resent && now_ns / 1e6 > r->tb__DOT__dut__DOT__t_boot + 180.0) {
@@ -350,9 +361,6 @@ int main(int argc, char **argv) {
         const double t = ms - t_boot1;
         return t >= 250 && t < 290 ? 1 << 8 : 0;                       // A
     };
-    // the PIC's view of the controller lines while "playing": bits sampled as CLOCK falls
-    int sn_idx = 0, sn_prev_clk = 1, sn_prev_latch = 0;
-    uint32_t sn_bits = 0;
     // port 2 and hidden-PIC checks
     bool p2_a_seen = false, joy2_a_seen = false, sel_in_game = false;
     int joy2_clks = 0, joy2_clk_prev = 0, menu_while_hidden = 0;
@@ -446,20 +454,9 @@ int main(int argc, char **argv) {
                 uint16_t b2 = buttons2(now_ns / 1e6);
                 tb->pad_d6 = pad_idx < 12 ? !(b2 >> pad_idx & 1) : pad_idx < 16 ? 1 : 0;
             }
-            // snooper (the PIC watching the lines): sample DATA as CLOCK falls, decide after 16
-            if (latch && !sn_prev_latch) { sn_idx = 0; sn_bits = 0; }
-            if (!latch && !pclk_ && sn_prev_clk) {
-                if (sn_idx < 16 && !tb->pad_t12) sn_bits |= 1u << sn_idx;
-                sn_idx++;
-                if (sn_idx == 16 && playing) {
-                    if (sn_bits & 0x04) { if (++wake_polls >= 2) wake(); }
-                    else wake_polls = 0;
-                }
-            }
             if (booted && (r->tb__DOT__dut__DOT__pad_raw & 0x0C24) == 0x04 &&
                 r->tb__DOT__dut__DOT__snes_pad_v) sel_in_game = true;
             if (r->tb__DOT__dut__DOT__p2_std && (r->tb__DOT__dut__DOT__p2_raw & 0x100)) p2_a_seen = true;
-            sn_prev_clk = pclk_; sn_prev_latch = latch;
             if (!booted && !r->tb__DOT__dut__DOT__core_reset) {
                 booted = true; boot_frame = frame; t_boot1 = r->tb__DOT__dut__DOT__t_boot;
             }
@@ -556,11 +553,12 @@ int main(int argc, char **argv) {
     if (scen && !quiet) {
         ok_menu = seen_menu_keys && seen_status && seen_log && woke && seen_follow && sent2 && booted2 &&
                   r->tb__DOT__dut__DOT__ram_keep == (fname2 == fname) && r->tb__DOT__dut__DOT__n_log > 0 &&
-                  sel_in_game && wakes_hidden >= 2 && backs >= 1 && menu_while_hidden == 0 &&
-                  pad_to_hidden == 0;
-        printf("hidden PIC: woke %d times before DOWN+SELECT, BACK TO GAME %d, menu shown while hidden %d"
-               " (must be 0), buttons to the hidden PIC %d (must be 0), game got SELECT %s\n",
-               wakes_hidden, backs, menu_while_hidden, pad_to_hidden, sel_in_game ? "yes" : "NO");
+                  sel_in_game && wakes_hidden == 0 && backs == 0 && menu_while_hidden == 0 &&
+                  pad_to_hidden == 0 && woke_at >= t_boot1 + 380;
+        printf("menu combination: PIC woke at +%.1f ms (DOWN+SELECT from +380), wakes before it %d"
+               " (must be 0), BACK TO GAME %d (must be 0), PIC screen without the keys before it %d"
+               " (must be 0), game got SELECT alone %s\n", woke_at - t_boot1, wakes_hidden, backs,
+               menu_while_hidden, sel_in_game ? "yes" : "NO");
         printf("menu scenario: menu view by keys %s, status page %s, log view %s, PIC woke on DOWN+SELECT %s,"
                " core followed it %s, second file %s, second boot %s (frame %d), save RAM %s\n",
                seen_menu_keys ? "ok" : "NO", seen_status ? "ok" : "NO", seen_log ? "ok" : "NO",

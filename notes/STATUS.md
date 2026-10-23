@@ -24,14 +24,16 @@ How it's used:
   the card's `SNES/` folder) and a line in `tools/sdcore roms`.
 - **DOWN+SELECT** (the JB menu combo; the PIC watches the pad lines itself) brings the browser
   back to load another game without a power cycle. **L+R+SELECT** shows our status/log page.
-  In v2/v3, SELECT alone did that too (the PIC reacts to SELECT); v4 hides that (below).
+  In v2/v3, SELECT alone did that too (the PIC reacts to SELECT in our pad registers); v5
+  fixes it (below).
 - After the transfer the core checks the ROM in SDRAM against the file's CRC-32 and shows
   "INFO CRC: OK" before booting.
 
-**Player 2 works** (v3, 23 Oct: port 2's data line is D6, found by a pin scan). **v4** (built 23
-Oct, not yet on the console; test: `notes/snes-load.md`, "Console test (v4)") reads D6 directly
-and keeps SELECT alone for the game: the PIC wakes on SELECT whatever we do, so the core keeps a
-PIC woken without DOWN+SELECT hidden behind the game (no buttons for it) until DOWN+SELECT.
+**Player 2 works** (v3, 23 Oct: port 2's data line is D6, found by a pin scan; v4 reads it
+directly). While a game runs the PIC polls our pad registers over the link and wakes on SELECT
+(v4 run); **v5** (built 23 Oct, not yet on the console; test: `notes/snes-load.md`, "Console test
+(v5)") passes the pad to it during games only while DOWN+SELECT is held, so SELECT alone is the
+game's.
 
 Limits now: saves are kept only while powered and only for the last game loaded (the SPC
 player context has no way to write files to SD); 64 KB save RAM, ROMs up to 6 MB; no Super FX,
@@ -74,7 +76,7 @@ Card" loader, BIOS files are on the card in `/BIOS`).
    `tools/sdcore use NN` / `tools/sdcore roms`; `sync; sudo umount /mnt/sd`.
 2. Start `tools/capview.py` (HDMI capture dongle MS2109 on homebox: records
    `~/scratch/cap/rec-*.mkv` with sound, live view http://homebox.jaguar-munsell.ts.net:8765/
-   for Denley's phone). Stop it with `pkill -INT -f "^python3 tools/capview.py"` (a plainer
+   for Denley's phone; it fetches frame by frame and survives app switches without a reload). Stop it with `pkill -INT -f "^python3 tools/capview.py"` (a plainer
    pattern kills your own shell).
 3. Denley: card in the console, Tools → Play SPC Files, then whatever the test needs. Read
    results from the recording (`tools/frames.sh`, ImageMagick crops); design test cores so one

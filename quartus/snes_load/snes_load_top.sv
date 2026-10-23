@@ -18,13 +18,14 @@
 // (as MiSTer's ioport.sv) unless the menu view is up, the PIC through 0x2000/0x2001 (v2: always,
 // as the stock core does; option: only while the menu view is up, as v1).
 // v4: port 2 (data on D6, found by v3's pin scan; LATCH and CLOCK shared with port 1), a second
-// virtual 4021 for the SNES. And SELECT alone stays the game's: the PIC watches the controller
-// lines itself and wakes on SELECT (v2/v3 console runs, with either poll waveform), so the core
-// decides what is shown: a PIC that wakes while DOWN+SELECT is (or was within 1.5 s) held is
-// shown at once (the JB menu combination); one that wakes on anything else stays hidden behind
-// the game, gets no buttons (pad registers 0) and is shown when DOWN+SELECT is pressed. Whenever
-// the PIC's screen comes up during a game, the PIC gets no buttons until all are released (a
-// SELECT still held would be its BACK TO GAME).
+// virtual 4021 for the SNES.
+// v5: the menu combination. While a game runs the PIC reads the pad registers (0x2000/0x2001,
+// every ~33 ms; v4 console log) and wakes on SELECT, so during a game the registers read 0
+// except while DOWN+SELECT is held: SELECT alone (and L+R+SELECT for our pages) stays the game's.
+// A PIC that wakes while DOWN+SELECT is (or was within 1.5 s) held is shown at once; one that
+// wakes otherwise (none should) stays hidden behind the game with 0s until DOWN+SELECT. Whenever
+// the PIC's screen comes up during a game it gets 0s until all buttons are released (a SELECT
+// still held would be its BACK TO GAME).
 // Views: the game; the menu view (the PIC's screen at 0x1018_0000: its file browser or menu),
 // shown by itself before a game, while the PIC is active after a game started (v2 "follow": any
 // UI-loop or screen write within the last 600 ms) or toggled by L+R+SELECT+START (1 s); the
@@ -407,15 +408,16 @@ module top #(
     wire [1:0] mode /* verilator public_flat_rd */ = diag_v == 2'd2 ? 2'd3 :
                       forced || diag_v == 2'd1 || (st_v == S_FAIL && !menu_t) ? 2'd2 :
                       menu_up ? 2'd1 : 2'd0;
-    // v4: during a game the PIC gets buttons only while its screen is shown, and only once all
-    // buttons held when it came up are released
-    reg menu_up_d = 1'b0, rel_wait = 1'b0;
+    // v5: during a game the PIC gets buttons while DOWN+SELECT is held (to wake it) and while its
+    // screen is shown (follow_on; not the keys' menu view), there only once all buttons held when
+    // it came up are released
+    reg follow_d = 1'b0, rel_wait = 1'b0;
     always @(posedge clk_vid) begin
-        menu_up_d <= menu_up;
-        if (st_v == S_RUN && menu_up && !menu_up_d) rel_wait <= 1'b1;
+        follow_d <= follow_on;
+        if (st_v == S_RUN && follow_on && !follow_d) rel_wait <= 1'b1;
         else if (btn == 12'd0) rel_wait <= 1'b0;
-        pic_pad_v  <= (!opt_gate || (menu_up && !forced) || st_v == S_IDLE || st_v == S_NOTROM) &&
-                      !(st_v == S_RUN && (!menu_up || rel_wait));
+        pic_pad_v  <= st_v == S_RUN ? (follow_on ? !rel_wait : dsel_now) :
+                      !opt_gate || (menu_up && !forced) || st_v == S_IDLE || st_v == S_NOTROM;
         snes_pad_v <= st_v == S_RUN && !menu_up;
         accept_v   <= menu_up && st_v == S_RUN;
     end

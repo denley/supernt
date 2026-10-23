@@ -11,7 +11,7 @@ set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
 set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
 set_global_assignment -name SAFE_STATE_MACHINE ON
 set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
-set_global_assignment -name SEED 1
+set_global_assignment -name SEED 2
 set_global_assignment -name OPTIMIZE_HOLD_TIMING "ALL PATHS"
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch1[*]
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to ch2[*]

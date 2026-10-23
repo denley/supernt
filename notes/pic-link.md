@@ -403,8 +403,17 @@ cone of each output pin, `allpins.py`, `h15*.py` = the link-domain cycle model o
   v1's poll waveform (1 kHz, 12 us latch, 6/6 us clocks), L+R+SELECT and L+R+START during Kirby
   never woke it, so the PIC follows only polls shaped like the stock core's [guess]. **Wrong:**
   in the v3 run SELECT alone woke it with v1's fast waveform too (forced FAST). It decodes any
-  waveform; the v1 run never tried SELECT without L+R. snes_load v4 instead keeps a PIC woken
-  without DOWN+SELECT hidden (notes/snes-load.md, "v4 in short").
+  waveform; the v1 run never tried SELECT without L+R.
+- **Correction (v4 run, 23 Oct): the PIC does not watch the lines; it reads the pad registers
+  over the link while playing.** v4 answered 0 there during games, and neither SELECT nor
+  DOWN+SELECT woke the PIC; its log showed `0x2000_0000` and `0x2001_0000` (2 bytes each) read
+  0x70F times from just after the file to the end (~33 ms apart), with no UI-loop writes. So
+  "nothing on the link" above was wrong: v1 only *counted* pad reads (n_padrd) instead of
+  logging them, and a repeated read of the same registers leaves the address register where
+  the previous one left it (`0x2001_0003`), which looked like silence. That also explains v1
+  (registers 0 outside its browser view: no wake), v2/v3 (always passed through: SELECT alone
+  woke it, with either poll waveform). snes_load v5 passes the pad to it during a game only
+  while DOWN+SELECT is held (notes/snes-load.md, "v5 in short").
 - Fallbacks if DOWN+SELECT doesn't wake it: the console's RESET button (read by the PIC), and
   the ID666 song length (a 20 s file: whatever the player does when a song ends shows up in
   v2's log). See notes/snes-load.md, "Console test (v2)".
