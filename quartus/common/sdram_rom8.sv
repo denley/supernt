@@ -41,8 +41,8 @@
 // ARAM port (the SPC700's 64 KB, quartus/snes_load v2: bank 3 at byte 0x600000 + address, so the
 // ROM may use banks 0-2 = 6 MB). The S-DSP/SPC700 make one RAM access per DSP substep (~5.2
 // clk_sys, address set at a clk_sys edge, data taken at the next DSP CE edge >= 5 clk_sys = 25
-// clk later, writes at every clk_sys edge of the substep). The controller samples the port at
-// k = 2 (settled; ar_q changes only at k = 3), posts writes in a 4-entry queue (consecutive duplicates dropped, a write to
+// clk later, writes at every clk_sys edge of the substep). The controller registers the port at
+// k = 2 (settled; ar_q changes only at k = 3) and decides at k = 4 (v7.2), posts writes in a 4-entry queue (consecutive duplicates dropped, a write to
 // the address in ar_q updates ar_q, reads of a queued address are answered from the queue) and
 // runs one bank-3 operation at a time, started only at k = 0 in command slots the ROM schedule
 // never uses (slot s = clk edges after the start, ROM read with ACT at slot a: a+2 READ, a+4
@@ -252,6 +252,13 @@ module sdram_rom8 #(
     reg         last_wv = 1'b0;         // the newest write taken (to drop repeats)
     reg  [15:0] last_wa = 16'd0;
     reg  [7:0]  last_wd = 8'd0;
+    // v7.1: the port registered at k = 2 (nothing but the core's signals), decided at k = 4
+    reg         s_en = 1'b0, s_rd = 1'b0, s_wr = 1'b0;
+    reg  [15:0] s_addr = 16'd0;
+    reg  [7:0]  s_d = 8'd0;
+    // this clk_sys cycle's write, unless it repeats the last one taken; the address read now
+    wire        s_wnew = s_en && s_wr && !(last_wv && last_wa == s_addr && last_wd == s_d);
+    wire [15:0] rd_now = s_en && s_rd ? s_addr : cur_rd;
     reg         hold_sel = 1'b0;        // rom_q's high lane from cap_hold (cap has an ARAM byte)
     reg  [7:0]  cap_hold = 8'd0;
     reg  [7:0]  rdar = 8'd0;            // rdar[k]: an ARAM READ left the pins k cycles ago
@@ -486,48 +493,56 @@ module sdram_rom8 #(
         end
 
         // ---------------------------------------------------------- ARAM port
-        // requests: sampled at k = 2 (the core's signals settled, as the ROM address); ar_q
-        // changes only at k = 3, so what the core derives from it has until the next k = 2
-        if (k_now == 3'd2 && ar_en) begin : sample
+        // requests: registered at k = 2 (the core's signals settled, as the ROM address) and
+        // decided at k = 4 (v7.1; was k = 2: the decision logic had no time left once the GSU
+        // filled the chip). ar_q changes only at k = 3, so what the core derives from it has until
+        // the next k = 2. A read completion at k = 3 falls between the two: it checks the k = 2
+        // sample itself (rd_now, s_wnew), as it checked cur_rd and a_stale when they were set at
+        // k = 2. Updates the decision posts (upd) reach ar_q at the next k = 3, one clk_sys later
+        // than before: 8 clk after the address change, the DSP takes the byte >= 25 clk after it.
+        if (k_now == 3'd2) begin
+            s_en <= ar_en; s_rd <= ar_rd; s_wr <= ar_wr; s_addr <= ar_addr; s_d <= ar_d;
+        end
+        if (k_now == 3'd4 && s_en) begin : sample
             reg        hit;
             reg [7:0]  hd;
             reg [2:0]  n;
             hit = 1'b0; hd = 8'd0;
-            if (a_on && a_op != A_RD && a_addr == ar_addr) begin hit = 1'b1; hd = a_data; end
+            if (a_on && a_op != A_RD && a_addr == s_addr) begin hit = 1'b1; hd = a_data; end
             for (qi = 0; qi < 4; qi = qi + 1)
-                if (qi < wq_n && wq_a[qi] == ar_addr) begin hit = 1'b1; hd = wq_d[qi]; end
-            if (ar_rd) cur_rd <= ar_addr;
-            if (ar_rd) begin
+                if (qi < wq_n && wq_a[qi] == s_addr) begin hit = 1'b1; hd = wq_d[qi]; end
+            if (s_rd) cur_rd <= s_addr;
+            if (s_rd) begin
                 if (hit) begin
-                    upd <= 1'b1; upd_d <= hd; upd_tag <= ar_addr;
+                    upd <= 1'b1; upd_d <= hd; upd_tag <= s_addr;
                     rq_need <= 1'b0;
-                    fwd_evt <= !(tag_ok && tag == ar_addr);     // (counted next cycle)
-                end else if ((tag_ok && tag == ar_addr) ||
-                             (a_on && a_op == A_RD && a_addr == ar_addr && !a_stale))
+                    fwd_evt <= !(tag_ok && tag == s_addr);     // (counted next cycle)
+                end else if ((tag_ok && tag == s_addr) ||
+                             (a_on && a_op == A_RD && a_addr == s_addr && !a_stale))
                     rq_need <= 1'b0;
                 else begin
-                    if (!rq_need || rq_addr != ar_addr) rq_age <= 3'd0;
+                    if (!rq_need || rq_addr != s_addr) rq_age <= 3'd0;
                     rq_need <= 1'b1;
-                    rq_addr <= ar_addr;
+                    rq_addr <= s_addr;
                 end
             end else
                 rq_need <= 1'b0;
-            if (ar_wr && !(last_wv && last_wa == ar_addr && last_wd == ar_d)) begin
-                last_wv <= 1'b1; last_wa <= ar_addr; last_wd <= ar_d;
-                if (tag_ok && tag == ar_addr) begin
-                    upd <= 1'b1; upd_d <= ar_d; upd_tag <= ar_addr;
+            if (s_wnew) begin
+                last_wv <= 1'b1; last_wa <= s_addr; last_wd <= s_d;
+                if (tag_ok && tag == s_addr) begin
+                    upd <= 1'b1; upd_d <= s_d; upd_tag <= s_addr;
                 end
-                if (a_on && a_op == A_RD && a_addr == ar_addr) a_stale <= 1'b1;
+                if (a_on && a_op == A_RD && a_addr == s_addr) a_stale <= 1'b1;
                 // queue: coalesce with the newest entry of the same address, else append
                 n = wq_n;
-                if (n != 3'd0 && wq_a[n - 3'd1] == ar_addr) wq_d[n - 3'd1] <= ar_d;
+                if (n != 3'd0 && wq_a[n - 3'd1] == s_addr) wq_d[n - 3'd1] <= s_d;
                 else if (n != 3'd4) begin
-                    wq_a[n[1:0]] <= ar_addr; wq_d[n[1:0]] <= ar_d; wq_n <= n + 3'd1;
+                    wq_a[n[1:0]] <= s_addr; wq_d[n[1:0]] <= s_d; wq_n <= n + 3'd1;
                 end else if (n_ar_drop != 16'hffff) n_ar_drop <= n_ar_drop + 16'd1;
             end
         end
         if (rdar[CAP_N] && a_op == A_RD) begin   // slot 8: the ARAM byte is in cap
-            if (!a_stale && cur_rd == a_addr) begin
+            if (!a_stale && !(s_wnew && s_addr == a_addr) && rd_now == a_addr) begin
                 ar_q <= cap; tag <= a_addr; tag_ok <= 1'b1;
             end
         end
@@ -564,7 +579,7 @@ module sdram_rom8 #(
                 end
                 wq_n <= wq_n - 3'd1;
                 n_ar_wr <= n_ar_wr + 32'd1;
-                // (a write sampled at this same edge can't be: samples are at k = 4)
+                // (a write can't be appended at this same edge: decisions are at k = 4)
             end
         end else if (a_on) begin
             a_slot <= a_slot + 4'd1;
