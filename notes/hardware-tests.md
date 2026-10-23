@@ -41,14 +41,16 @@ The SNES core with the Super FX next to the SA-1 (`notes/snes-load.md`, "v7 in s
 simulation Yoshi's Island reaches its Super FX-drawn Nintendo logo and Star Fox its starfield
 intro, both as in Mesen2; the SA-1 test, menu, second load and save RAM still pass.
 
-**The card is prepared** (24 Oct ~07:45): `SYSTEM/CORES/spc.cor` =
-`TESTCORES/18-q-snes_gsu-c3.cor`: **Super FX only** (no SA-1), with the case III / cap_lo
-controller fixes (`notes/snes-load.md`, "v7 build": no late ARAM reads in Yoshi's Island),
-timing fully met. Also on the card: `16-q-snes_load-v7.cor` (SA-1 + Super FX, without those
-fixes, clk_mem setup 0.13 ns short at slow 85 °C), `17-q-snes_gsu.cor` (Super FX only, without
-the fixes), `19-q-snes_load-v72.cor` (SA-1 + Super FX with the fixes and v7.2's registered ARAM
-port, timing met: newer, less simulated than 18), `14-q-snes_load.cor` = v6. (The ~05:00 cores had a loader bug and were replaced.)
-`SPC/6 Yoshi's Island.spc` and `SPC/7 Star Fox.spc` are there.
+**The card is prepared** (24 Oct ~08:10): `SYSTEM/CORES/spc.cor` =
+`TESTCORES/19-q-snes_load-v72.cor`: **SA-1 + Super FX** with all the overnight fixes (loader,
+case III, cap_lo) and v7.2's registered ARAM port, **timing met** (clk_mem +0.58 ns). In
+simulation: SA-1 regression PASS; Yoshi's Island to frame 364 with no ARAM read late and its
+frames pixel-identical to v7.0's; Star Fox clean so far (runs were still going). Also on the
+card: `18-q-snes_gsu-c3.cor` (Super FX only, case III + cap_lo, timing met, fully simulated:
+the fallback for Super FX), `16-q-snes_load-v7.cor` / `17-q-snes_gsu.cor` (the same two
+without the controller fixes; 16 is 0.13 ns short on clk_mem), `14-q-snes_load.cor` = v6.
+(The ~05:00 cores had a loader bug and were replaced.) `SPC/6 Yoshi's Island.spc` and `SPC/7
+Star Fox.spc` are there.
 
 1. Start `tools/capview.py` (check `pgrep -a ffmpeg` afterwards; restart it if the live view
    says no signal while the TV has a picture).
@@ -56,12 +58,11 @@ port, timing met: newer, less simulated than 18), `14-q-snes_load.cor` = v6. (Th
    SUPER FX" and "INFO CRC: OK", then "Nintendo Presents", the stitched Nintendo logo, "A long,
    long time ago...", the title; start a game and play a little (listen to the music: a wrong
    ARAM byte would show as clicks or a stuck/garbled tune). DOWN+SELECT, **7 Star Fox**: intro
-   with the 3D Arwings, a bit of the first level. (SA-1 games don't run on this core.)
-3. Then `tools/sdcore use 19` (**v7.2**: SA-1 + Super FX with the fixes, timing met with
-   margin): **2 Kirby Super Star** or **4 Super Mario RPG** as the SA-1 check, and Yoshi's
-   Island and Star Fox again. If all of that works, 19 is the one core for everything.
-4. If 18 misbehaves: `tools/sdcore use 17` (same without the controller fixes) narrows it down;
-   16 is the combined core without them. `tools/sdcore use 14` goes back to v6.
+   with the 3D Arwings, a bit of the first level. DOWN+SELECT, **2 Kirby Super Star** or **4
+   Super Mario RPG** as the SA-1 check.
+3. If the Super FX games misbehave: `tools/sdcore use 18` (Super FX only, the same fixes, the
+   most simulated) and the same two games; then 17/16 (without the controller fixes) to narrow
+   it down. If only the SA-1 games misbehave: 14 (v6) confirms the console side.
 
 ## memtest v3 (15-q-memtest, 23 Oct) results
 
