@@ -1,4 +1,4 @@
- [y]SUPER NT SNES LOADER v2[w]  T {0.8} ms   state {2.1:y} [g]{E:24}
+ [y]SUPER NT SNES LOADER v4[w]  T {0.8} ms   state {2.1:y} [g]{E:24}
  [y]LINK[w]  answer {2.2@6:y}  status rd {3.8}  UI loops {4.8}  pad rd {5.8}
        reads {42.8}  writes {6.8}  addr {7.8}  screen {33.8}
        last T {43.8}  UI {34.8}  scr {44.8}  0021={45.2@6:y} T {46.8} n{45.4}
@@ -15,7 +15,7 @@
  [y]SNES[w]  boot T {27.8}  frames {36.8}  pad {31.8} {E:7} polls {32.4}
        save RAM {E:40}  game {47.8}
  [y]OPTIONS[w] {E:70}
- [y]KEYS[w] L+R+SELECT: page  L+R+SELECT+START: menu  L+R+A: boot  L+R+U/D/L: options
+ [y]PORT 2[w] data D6  pad {49.8}  {E:7}  L+R+SELECT: page  DOWN+SELECT: menu
  [y]PIC LINK LOG[w] {E:24} entries {35.4} after file {48.3} {E:13}
    IDX  SEQ K ADDRESS  BYTES D0 REPEATS T FIRST T LAST
    {62.3} {57.4@4} {58.1@6:y} {56.8} {57.4} {58.2:y} {59.4}    {60.6}  {61.6}

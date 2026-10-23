@@ -187,8 +187,8 @@ module top #(
         .sysclkf_ce(sysclkf_ce), .sysclkr_ce(),
         .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde), .high_res(high_res),
         .v224(v224), .audio_l(audio_l), .audio_r(audio_r),
-        .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_d0(joy_d0),
-        .ext_aram_addr(), .ext_aram_d(), .ext_aram_rd(), .ext_aram_wr(), .ext_aram_q(8'h00),
+        .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_clk(), .joy2_clk(), .joy1_d0(joy_d0),
+        .joy2_d0(1'b1), .ext_aram_addr(), .ext_aram_d(), .ext_aram_rd(), .ext_aram_wr(), .ext_aram_q(8'h00),
         .bsram_clr(1'b0), .bsram_clr_done()
     );
 

@@ -16,8 +16,8 @@ evidence), **[likely]** (clean decode, one line of evidence), **[guess]**.
   `0x2008_0000` = device type (01 = standard pad) [likely; "Link registers" below]. The SPC
   player's UI loop reads `0x2000`/`0x2001` every ~16 ms (hwtest v3, 22 Oct).
 - **Only one data line is read.** No other pin in spc.cor behaves like a pad input. Port 2
-  data, the D1 lines and IOBit are either on pins spc.cor leaves unconfigured or not wired to
-  the FPGA. Their pins are unknown.
+  data is on D6, a pin spc.cor leaves unconfigured (found on the console, "Port 2" below); the
+  D1 lines and IOBit are unknown.
 - **Roles**, from a cycle model of the decoded logic (no assumed fixes any more, see
   Derivation):
   - P14 = LATCH;
@@ -33,7 +33,8 @@ evidence), **[likely]** (clean decode, one line of evidence), **[guess]**.
 | P14 | 4A | push-pull output, `V2P5_50OHM`, OE always on | LATCH | output from the poller [confirmed], latch role [likely, model] |
 | J13 | 7A (HMC bypass `IOINTDQSBDOUT.4`) | push-pull output, `V2P5_50OHM` | CLOCK (one of the ports) | output from the poller [confirmed], clock role [likely, model] |
 | K16 | 7A (HMC bypass `IOINTDQDOUT.64`) | push-pull output, `V2P5_50OHM` | CLOCK (the other port) | same as J13 |
-| port 2 D0, D1 ×2, IOBit ×2 | ? | not used by spc.cor | – | unknown |
+| D6 | 8A | not used by spc.cor | port 2 DATA (D0), line low = pressed | [confirmed] (snes_load v3 scan, player 2 works) |
+| D1 ×2, IOBit ×2 | ? | not used by spc.cor | – | unknown |
 
 "Confirmed" for J13/K16 as poller outputs: they are driven combinationally from
 `LAB.029.011.8` (= `029.011.5.FFT0 & 029.011.1.FFB1`), which is inside the same register
@@ -220,11 +221,50 @@ t (clocks)   P14  J13/K16
    flip are obsolete. The latch/clock roles follow from the waveform (P14 one pulse per poll,
    J13/K16 33 pulses with T12 sampled on each) [likely; not checked on hardware].
 
+## Port 2 (snes_load v3 scan, 23 Oct 2026)
+
+Our cores had no player 2: spc.cor reads port 1 only, so the port 2 data pin is unknown, and the
+JB firmware (whose SNES core reads both ports) is encrypted. On a SNES both ports share LATCH
+(OUT0), and spc.cor drives CLOCK on two pins (J13, K16) with the same signal, most likely one per
+port, so a pad in port 2 should already shift its bits in step with port 1 while we poll. What
+is missing is the data line.
+
+Candidates: every pin that could be an input. Of the package's user I/Os, spc.cor leaves only
+**12 unconfigured** (`build/f23-pins.txt` minus `build/spc-pinmap.txt` minus the constant outputs
+in notes/sdram.md, "Constant pins", minus configuration/JTAG/AS pins, which Quartus' .pin report
+names): M7 (3A), U12 (3B), U13 (4A), G11 H10 L8 (7A), D6 D9 E10 E7 F9 G10 (8A). Every other pin is
+either driven by spc.cor (logic or a constant: not a pad input) or one of its open-drain pins,
+which it **releases**: B11 A8 B10 A10 A9 A12 B12 C16 (read back into the link mux), G6 (read back)
+and Y3 W9 W8 Y9 Y10 R11 R10 Y11 (constant released). Those 17 are inputs in effect, so they are
+candidates too: 29 in all, in that order (`p2c[0-28]` in `quartus/snes_load/pins.tcl`). snes_load
+v1/v2 already had all of them as weak pull-up inputs (unused pins), and v3 keeps exactly that
+(inputs with the weak pull-up, never driven).
+
+`quartus/common/pad_scan.sv` samples them at pad_poll's 32 sample points and calls a pin
+**pad-like** when samples 12-15 are "not pressed" and 16-31 "pressed" for 3 polls in a row
+(a standard pad; checked in both polarities), and **independent** once it was pad-like in a poll
+whose bits differed from port 1's (a second copy of port 1's line would never differ). The
+lowest pad-like, independent pin becomes port 2. The status page's PORT 2 line shows the pin,
+its polarity, its 32 bits and one character per candidate: `0`/`1` constant, `L`/`H` changed
+between polls only, `T` toggled within a poll, `c` pad-like but so far identical to port 1, `P`
+port 2 candidate (normal polarity, line low = pressed, as T12), `Q` the same inverted.
+
+How to read a console run: a `P` (and "pin XX normal", `std`) with a pad in port 2 answers the
+question, and player 2 works right away. If nothing turns `P`: an `L`/`H` that follows B on pad 2
+(the 4021's first bit, shown while LATCH is high) would mean the data line is found but K16/J13
+doesn't clock port 2; all `0`/`1` would mean the line isn't on any of these pins (probe the
+board: Q1-Q7 / R36-R45 next to J5/J6).
+
+**Result (console, 23 Oct): port 2 data = D6** (bank 8A, `GPIO.012.045.3`), normal polarity
+(line low = pressed, as T12), clocked by the shared LATCH/CLOCK (so J13/K16 do reach port 2).
+Scan string with a pad in each port: `110110P10000111…` (U13, L8, E10, E7, F9, G10 read 0, the
+other unconfigured pins and all open-drain pins 1). Player 2 played Kirby Super Star. From v4
+the core reads D6 directly (`pad_poll.sv`, weak pull-up as in the scan); the scanner
+(`quartus/common/pad_scan.sv`) is no longer built but kept for finding other input pins.
+
 ## Open questions
 
-- Pins for port 2 data, the D1 lines and IOBit (not configured by spc.cor). They need a probe
-  on the board, or a test core that samples candidate unconfigured pins while a pad is held.
-  Beware the cart-bus shifter direction pins.
+- The D1 lines and IOBit of both ports (not needed for standard pads).
 - Whether the board's latch/clock drivers invert (Q1–Q7 near J5/J6). The decoded waveform
   is already SNES-shaped (latch high pulse, clock idle high), so non-inverting is likely.
 - Whether the stock core really drops buttons 0–4 (the stage-29 clear above; hwtest v4's
@@ -233,7 +273,7 @@ t (clocks)   P14  J13/K16
   `0x2003`).
 - The real frequency of `CMUXHG.000.022.3` (clock switchover not decoded).
 - Whether J13 = port 1 clock and K16 = port 2 clock or the reverse (irrelevant while both get
-  the same signal).
+  the same signal), and whether either really reaches port 2 (the v3 scan shows it).
 
 ## Used by quartus/snes_load v2 (Oct 2026)
 

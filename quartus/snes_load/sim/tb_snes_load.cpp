@@ -20,15 +20,21 @@
 //   after it   what the console's PIC did after a file (hardware-tests.md, 23 Oct): 8 bytes at
 //              0x1018_0F6C, 0x1000_D129 = 00, 0x0000_00FE = 06, 0x1000_0102 = 00, 0x1000_0010 =
 //              00, 20 ms later 0x1000_0021 = F8, one more UI loop, then nothing on the link;
-//   playing    the PIC watches the controller lines itself (the v2 hypothesis: the Super Nt's
-//              menu combination DOWN+SELECT, decoded from LATCH/CLOCK/DATA as the core polls the
-//              pad); two polls in a row with DOWN+SELECT wake it: it redraws its browser screen
-//              and runs the UI loop again, so a second file can be picked.
+//   playing    the PIC watches the controller lines itself, as the console's did (v2/v3 runs:
+//              SELECT alone woke it, with either poll waveform): two polls in a row with SELECT
+//              held wake it: it redraws its browser screen and runs the UI loop again. In its
+//              browser after a game, SELECT (from the pad registers) is BACK TO GAME: silent
+//              again.
 // The "user" (pad), times after the first boot: L+R+SELECT+START at +40 and +120 ms (menu view
-// on, off: the PIC stays silent), L+R+SELECT at +200, +260, +320 (status page, log view, off),
-// DOWN+SELECT at +380 (the PIC wakes, the core follows it to the menu view), DOWN at +480 (the
-// second file), Y at +530: the second file (TB_FILE2, default the same ROM under another name:
-// save RAM kept) is loaded and booted; the SA-1 tests must pass again.
+// by the keys on, off; the first wakes the PIC, which the core keeps hidden; the second, with
+// the menu view up, is the PIC's BACK TO GAME), L+R+SELECT at +200, +260, +320 (status page,
+// log view, off; the PIC wakes again and stays hidden: the game is shown, the PIC reads 0s),
+// SELECT alone at +362 (the game gets it), DOWN+SELECT at +380 (the core shows the PIC's screen
+// and gives it the pad only after the release), DOWN at +480 (the second file), Y at +530: the
+// second file (TB_FILE2, default the same ROM under another name: save RAM kept) is loaded and
+// booted; the SA-1 tests must pass again.
+// Port 2 (v4): a second 4021 pad on pad_d6 (LATCH/CLOCK shared); A held at +250-290 ms after the
+// boot must reach the SNES's port 2 latch.
 //
 // Usage: tb_snes_load <frames> <out-prefix> [file.spc]  (default build/snes_load/sa1test.spc)
 // Environment: TB_FAST=1 (no gaps between runs), TB_PULSE=ns (strobe phases, default 150),
@@ -193,12 +199,13 @@ int main(int argc, char **argv) {
     if (const char *pp = getenv("TB_PULSE")) pic.pulse = atof(pp);   // strobe phase (ns)
     double now_ns = 0;
     int polls = 0, poll_ok_at = -1, ui_loops = 0, ui_after_boot = 0, presses_down = 0, runs = 0;
-    int pad_nonzero_in_game = 0, pad_reads_in_game = 0;
+    int pad_nonzero_in_game = 0, pad_reads_in_game = 0, pad_to_hidden = 0, wakes_hidden = 0, backs = 0;
     double t_file0 = -1, t_file1 = -1;
     uint8_t s0b = 0, s1b = 0, pad_prev = 0, pad_now = 0;
     bool sending = false, sent = false, booted = false, resent = false;
     bool playing = false, woke = false, sent2 = false, skip_edge = false;
     int nfile = 0, wake_polls = 0;
+    double woke_at = -1;
     double t_boot1 = -1;
     std::function<void()> ui_loop, poll;
     std::vector<uint8_t> scr;
@@ -253,8 +260,9 @@ int main(int argc, char **argv) {
             pic.call([&]() { playing = true; wake_polls = 0; });
         });
     };
-    auto wake = [&]() {                     // DOWN+SELECT seen on the controller lines
-        playing = false; woke = true; sent = false;
+    auto wake = [&]() {                     // SELECT seen on the controller lines
+        playing = false; woke = true; sent = false; woke_at = now_ns / 1e6;
+        if (booted && woke_at < t_boot1 + 380) wakes_hidden++;
         skip_edge = true;                   // buttons held while it wakes aren't new presses
         send_screen();
         pic.call(ui_loop);
@@ -275,6 +283,14 @@ int main(int argc, char **argv) {
             uint8_t pressed = skip_edge ? 0 : pad_now & ~pad_prev;
             skip_edge = false;
             pad_prev = pad_now;
+            if (scen && booted && woke && now_ns / 1e6 < t_boot1 + 380 && pad_now &&
+                !r->tb__DOT__dut__DOT__menu_t)
+                pad_to_hidden++;                 // buttons reached a PIC the core keeps hidden
+            if (scen && booted && woke && !sent2 && !sending && (pressed & 0x04)) {
+                backs++;                         // BACK TO GAME: silent again
+                playing = true; wake_polls = 0;
+                return;
+            }
             if (!scen && booted && !resent && now_ns / 1e6 > r->tb__DOT__dut__DOT__t_boot + 180.0) {
                 resent = true;
                 send_file();
@@ -323,14 +339,23 @@ int main(int argc, char **argv) {
         if ((t >= 40 && t < 100) || (t >= 120 && t < 180)) b |= L | R | SEL | START;  // menu on, off
         if ((t >= 200 && t < 240) || (t >= 260 && t < 300) || (t >= 320 && t < 360))
             b |= L | R | SEL;                                          // status, log, off
+        if (t >= 362 && t < 374) b |= SEL;                             // SELECT alone: the game's
         if (t >= 380 && t < 430) b |= DN | SEL;                        // the Super Nt menu combination
         if (t >= 480 && t < 500) b |= DN;                              // second file
         if (t >= 530 && t < 550) b |= Y;                               // RUN
         return b;
     };
+    auto buttons2 = [&](double ms) -> uint16_t {         // pad 2 (p2c[9])
+        if (!booted || !scen || quiet) return 0;
+        const double t = ms - t_boot1;
+        return t >= 250 && t < 290 ? 1 << 8 : 0;                       // A
+    };
     // the PIC's view of the controller lines while "playing": bits sampled as CLOCK falls
     int sn_idx = 0, sn_prev_clk = 1, sn_prev_latch = 0;
     uint32_t sn_bits = 0;
+    // port 2 and hidden-PIC checks
+    bool p2_a_seen = false, joy2_a_seen = false, sel_in_game = false;
+    int joy2_clks = 0, joy2_clk_prev = 0, menu_while_hidden = 0;
 
     // ---------------------------------------------------------------- clocks and frames
     const double h74 = 1e6 / 74.25 / 2, hsys = 1e6 / 21.44196 / 2, hmem = hsys / 5;   // ps (clk_mem = 5 x)
@@ -338,6 +363,7 @@ int main(int argc, char **argv) {
     long long mem_edges = 0;
     tb->clk = 0; tb->clk_sys = 0; tb->clk_mem = 0;
     tb->pad_t12 = 1;
+    tb->pad_d6 = 1;
     tb->pic_nrd = 0; tb->pic_nwr = 1; tb->pic_a = 0; tb->pic_drive = 0;
     tb->eval();
 
@@ -416,16 +442,23 @@ int main(int argc, char **argv) {
             else if (pclk_ && !prev_clk) pad_idx++;
             prev_clk = pclk_; prev_latch = latch;
             tb->pad_t12 = pad_idx < 12 ? !(bt >> pad_idx & 1) : pad_idx < 16 ? 1 : 0;
+            {
+                uint16_t b2 = buttons2(now_ns / 1e6);
+                tb->pad_d6 = pad_idx < 12 ? !(b2 >> pad_idx & 1) : pad_idx < 16 ? 1 : 0;
+            }
             // snooper (the PIC watching the lines): sample DATA as CLOCK falls, decide after 16
             if (latch && !sn_prev_latch) { sn_idx = 0; sn_bits = 0; }
             if (!latch && !pclk_ && sn_prev_clk) {
                 if (sn_idx < 16 && !tb->pad_t12) sn_bits |= 1u << sn_idx;
                 sn_idx++;
                 if (sn_idx == 16 && playing) {
-                    if ((sn_bits & 0x24) == 0x24) { if (++wake_polls >= 2) wake(); }
+                    if (sn_bits & 0x04) { if (++wake_polls >= 2) wake(); }
                     else wake_polls = 0;
                 }
             }
+            if (booted && (r->tb__DOT__dut__DOT__pad_raw & 0x0C24) == 0x04 &&
+                r->tb__DOT__dut__DOT__snes_pad_v) sel_in_game = true;
+            if (r->tb__DOT__dut__DOT__p2_std && (r->tb__DOT__dut__DOT__p2_raw & 0x100)) p2_a_seen = true;
             sn_prev_clk = pclk_; sn_prev_latch = latch;
             if (!booted && !r->tb__DOT__dut__DOT__core_reset) {
                 booted = true; boot_frame = frame; t_boot1 = r->tb__DOT__dut__DOT__t_boot;
@@ -441,11 +474,13 @@ int main(int argc, char **argv) {
             }
             {
                 int m = r->tb__DOT__dut__DOT__mode;
-                if (booted && !woke && m == 1) seen_menu_keys = true;
-                if (booted && !woke && m == 2 && r->tb__DOT__dut__DOT__ld_state == 5) seen_status = true;
-                if (booted && !woke && m == 3) seen_log = true;
-                if (woke && m == 1 && !sent2) seen_follow = true;
-                if (booted && !woke && m == 1 && pic.q.size() > 0 && !playing) ;
+                const bool mt = r->tb__DOT__dut__DOT__menu_t;
+                const double tb_ms = now_ns / 1e6 - t_boot1;
+                if (booted && m == 1 && mt) seen_menu_keys = true;
+                if (booted && !sent2 && m == 2 && r->tb__DOT__dut__DOT__ld_state == 5) seen_status = true;
+                if (booted && !sent2 && m == 3) seen_log = true;
+                if (booted && tb_ms < 380 && m == 1 && !mt) menu_while_hidden++;
+                if (woke && tb_ms >= 380 && m == 1 && !mt && !sent2) seen_follow = true;
             }
             // video
             int hs = tb->s0, vs = tb->s1, de = tb->s2;
@@ -471,6 +506,12 @@ int main(int argc, char **argv) {
             mem_edges++;
             tmem += hmem;
             tb->eval();
+            if (sys_edge && tb->clk_sys && r->tb__DOT__dut__DOT__snes_pad_v) {
+                if (r->tb__DOT__dut__DOT__joy2_lat == 0xFF7F) joy2_a_seen = true;   // A only, just latched
+                int jc = r->tb__DOT__dut__DOT__joy2_clk;
+                if (jc && !joy2_clk_prev) joy2_clks++;
+                joy2_clk_prev = jc;
+            }
         }
     }
     tb->final();
@@ -507,10 +548,19 @@ int main(int argc, char **argv) {
                r->tb__DOT__dut__DOT__n_ign);
         ok_link &= ok_guard;
     }
+    bool ok_p2 = true;
+    if (scen && !quiet) ok_p2 = p2_a_seen && joy2_a_seen && joy2_clks > 0;
+    printf("port 2: A on pad 2 %s, in the SNES's port 2 latch %s, port 2 clock pulses %d\n",
+           p2_a_seen ? "seen" : "NOT SEEN", joy2_a_seen ? "seen" : "NOT SEEN", joy2_clks);
     bool ok_menu = true;
     if (scen && !quiet) {
         ok_menu = seen_menu_keys && seen_status && seen_log && woke && seen_follow && sent2 && booted2 &&
-                  r->tb__DOT__dut__DOT__ram_keep == (fname2 == fname) && r->tb__DOT__dut__DOT__n_log > 0;
+                  r->tb__DOT__dut__DOT__ram_keep == (fname2 == fname) && r->tb__DOT__dut__DOT__n_log > 0 &&
+                  sel_in_game && wakes_hidden >= 2 && backs >= 1 && menu_while_hidden == 0 &&
+                  pad_to_hidden == 0;
+        printf("hidden PIC: woke %d times before DOWN+SELECT, BACK TO GAME %d, menu shown while hidden %d"
+               " (must be 0), buttons to the hidden PIC %d (must be 0), game got SELECT %s\n",
+               wakes_hidden, backs, menu_while_hidden, pad_to_hidden, sel_in_game ? "yes" : "NO");
         printf("menu scenario: menu view by keys %s, status page %s, log view %s, PIC woke on DOWN+SELECT %s,"
                " core followed it %s, second file %s, second boot %s (frame %d), save RAM %s\n",
                seen_menu_keys ? "ok" : "NO", seen_status ? "ok" : "NO", seen_log ? "ok" : "NO",
@@ -531,12 +581,12 @@ int main(int argc, char **argv) {
     ok_diag = diag_frames > 0;
     bool ok_sd = r->tb__DOT__sdram__DOT__errors == 0 && r->tb__DOT__dut__DOT__sd_late == 0 &&
                  r->tb__DOT__dut__DOT__sd_stall == 0 && r->tb__DOT__sdram__DOT__max_ref_gap <= 1673;
-    bool ok = ok_link && ok_browser && ok_cursor && ok_load && ok_map && ok_sd && ok_menu && ok_aram &&
+    bool ok = ok_link && ok_browser && ok_cursor && ok_load && ok_map && ok_sd && ok_menu && ok_aram && ok_p2 &&
               (game || (ok_wram && ok_pix && ok_lock && ok_ring && ok_diag));
-    printf("%s: link %s, browser %s, cursor %s, load+verify %s, mapper %s, SDRAM %s, ARAM %s, menu %s",
+    printf("%s: link %s, browser %s, cursor %s, load+verify %s, mapper %s, SDRAM %s, ARAM %s, menu %s, port 2 %s",
            ok ? "PASS" : "FAIL", ok_link ? "ok" : "BAD", ok_browser ? "ok" : "BAD", ok_cursor ? "ok" : "BAD",
            ok_load ? "ok" : "BAD", ok_map ? "ok" : "BAD", ok_sd ? "ok" : "BAD", ok_aram ? "ok" : "BAD",
-           ok_menu ? "ok" : "BAD");
+           ok_menu ? "ok" : "BAD", ok_p2 ? "ok" : "BAD");
     if (!game)
         printf(", SA-1 tests %s, summary band %s, frame lock %s, line buffer %s, diagnostics over the game %s",
                ok_wram ? "all pass" : "BAD", ok_pix ? "green" : "NOT green", ok_lock ? "ok" : "BAD",

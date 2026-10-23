@@ -8,10 +8,47 @@ transfer the core checks the ROM in SDRAM against the file's CRC-32, shows the r
 and starts the game. Everything the PIC does stays visible on a diagnostics page.
 
 **Status:** v1 (commit 6ea85d1) **works on the console** (23 Oct: SA-1 test, Gradius III,
-Kirby Super Star; notes/hardware-tests.md). v2 (this version, "v2" below) closes v1's gaps:
-the way back to the player's menu, 64 KB of save RAM (Super Mario RPG, Kirby's Dream Land 3),
-keeping saves across reloads, a full PIC link log. Simulated and built; **not yet run on the
-console**: the one-run test is at the end ("Console test (v2)").
+Kirby Super Star; notes/hardware-tests.md). v2 (commit dd820dc) closes v1's gaps: the way back
+to the player's menu, 64 KB of save RAM (Super Mario RPG, Kirby's Dream Land 3), keeping saves
+across reloads, a full PIC link log; **works on the console** (23 Oct, DOWN+SELECT back to the
+browser). v3 (one console run, 23 Oct) found port 2's data pin (D6: **player 2 works**) but its
+SELECT fix didn't work. v4 (this version, "v4 in short" below) reads D6 directly and keeps a PIC
+woken by SELECT alone hidden; the test is "Console test (v4)".
+
+## v4 in short (23 Oct 2026)
+
+- **Player 2** on D6 (`pad_poll.sv` reads it in the same poll as T12; LATCH and CLOCK are shared),
+  a second virtual 4021 for the SNES (`snes_sdram_core.sv` has separate port clocks and a
+  `joy2_d0`). Without a pad, port 2 reads as empty. The scanner is gone from the build.
+- **SELECT alone**: the PIC watches the controller lines itself and wakes on SELECT whatever the
+  poll waveform (v3 run), and that can't be hidden from it. So the core now decides what is
+  shown: a PIC that wakes while DOWN+SELECT is held (or was, within 1.5 s: `WAKE_MS`) is shown
+  at once, as before; one that wakes on anything else (SELECT alone, L+R+SELECT for our pages)
+  stays **hidden**: the game stays on screen and gets every button, the PIC's pad registers
+  read 0 (so its browser can't act; OPTIONS shows `view GAME+PIC`), and DOWN+SELECT later shows
+  it. Whenever the PIC's screen comes up during a game, the PIC gets 0s until all buttons are
+  released (a held SELECT would be its BACK TO GAME). Poll timing is STOCK again by default
+  (L+R+UP: FAST (v1)).
+- Status page: the PORT 2 row shows `data D6`, port 2's 32 bits and std pad / no pad, and the
+  two main keys.
+
+## v3 in short (23 Oct 2026, superseded by v4)
+
+- **SELECT alone opened the PIC's browser** in a game (Denley, v2 run): the PIC watches the
+  controller lines itself, and its "playing" mode reacts to SELECT, so the JB combination
+  DOWN+SELECT only worked because it contains SELECT. In the v1 run, with v1's fast poll waveform
+  (1 kHz, 12 us latch, 6/6 us clocks), L+R+SELECT and L+R+START in Kirby never woke it; v2's
+  stock waveform did. So v3's poll timing **AUTO** (default) uses v1's fast waveform while a game
+  runs and the PIC is quiet, and switches to the stock waveform while DOWN+SELECT is held (and
+  1.5 s after), so the PIC sees SELECT only with DOWN. Everywhere else (browser, loading, PIC
+  active) it stays stock, as v2. The game gets the same bits either way. If the PIC turns out to
+  follow the fast waveform too, L+R+UP on the status page cycles AUTO -> STOCK -> FAST (v1).
+- **Player 2.** Port 2's data pin is unknown (spc.cor reads port 1 only; notes/controllers.md,
+  "Port 2"). `pad_scan.sv` samples the 29 pins it could be (only read, weak pull-up as before) at
+  the poll's sample points and takes the first that answers like a pad and independently of
+  port 1 as port 2: a second virtual 4021 for the SNES (`snes_sdram_core.sv` now has separate
+  port clocks and a `joy2_d0`). Without a pad, port 2 reads as empty. The status page's KEYS row
+  is now **PORT 2**: pin, polarity, its 32 bits, std/no pad, and one character per candidate.
 
 ## v2 in short (23 Oct 2026)
 
@@ -64,12 +101,12 @@ console**: the one-run test is at the end ("Console test (v2)").
    the v2 decode) and writes its screen or runs its UI loop, the core shows its screen, gives it
    the pad and accepts the next file (step 3 again).
 
-Keys (v2; exact combinations, nothing else held): **L+R+SELECT** (0.5 s) cycles the
+Keys (v2, v3 the same except L+R+UP; exact combinations, nothing else held): **L+R+SELECT** (0.5 s) cycles the
 diagnostics: status page -> log view -> off; **L+R+SELECT+START** (1 s) the menu view (the
 PIC's screen; the PIC gets the pad, the game doesn't; RUN on a file loads it) on/off; **L+R+A**
 (0.5 s) boot after a failed verify; on the status page **L+R+UP / DOWN / LEFT** (0.5 s) toggle
-the options (pad poll STOCK/FAST, PIC pad ALWAYS/GATED, follow ON/OFF), shown on its OPTIONS
-line. (v1: L+R+SELECT page, L+R+START browser.) While a game runs, a file the PIC sends while
+the options (pad poll STOCK/FAST; v3: AUTO -> STOCK -> FAST (v1), shown as AUTO:FAST /
+AUTO:STOCK while AUTO; PIC pad ALWAYS/GATED, follow ON/OFF), shown on its OPTIONS line. (v1: L+R+SELECT page, L+R+START browser.) While a game runs, a file the PIC sends while
 the menu view is down is ignored (counted as "lost ... ign"). The JB menu combination DOWN +
 SELECT is the PIC's (if it watches the pad lines); the core only follows what the PIC does.
 
@@ -82,7 +119,8 @@ SELECT is the PIC's (if it watches the pad lines); the core only follows what th
 | `quartus/common/link_ui.sv` | PIC32 link slave: status 02, pad registers, browser screen RAM, file stream, log |
 | `quartus/common/rom_loader.sv` | file → SDRAM, CRCs, info block, header scoring, mapper, read-back, boot |
 | `quartus/common/sdram_rom8.sv` | 8-bit SDRAM controller for chip B (from `sdram_rom.sv`) |
-| `quartus/common/pad_poll.sv` | controller port 1 poller (PAD_CFG 0 wiring) |
+| `quartus/common/pad_poll.sv` | controller poller (PAD_CFG 0 wiring), port 1 on T12, v4: port 2 on D6 |
+| `quartus/common/pad_scan.sv` | v3's port 2 finder (29 candidate pins, notes/controllers.md "Port 2"); not built since v4 |
 | `quartus/common/overlay.sv` | browser and diagnostics text layers on snes_video's counters |
 | `quartus/snes_load/diag.txt` | diagnostics page template (`tools/mkscreen.py`, now 64 status words) |
 | `quartus/snes_load/sa1_vbp.patch` | SA1.vhd: VBP takes its ROM word one SA-1 cycle later (below) |
@@ -325,7 +363,35 @@ as `quartus/hwtest` (data driven only while /RD is low), SDRAM command/address/B
 DQM candidates / open-drain group, hwtest's 43 stock-constant pins, everything else.
 `tools/checkpins.py` passes.
 
+v3: + 29 inputs `p2c` (port 2 candidates: the 12 pins spc.cor leaves unconfigured and its 17
+released open-drain pins, notes/controllers.md "Port 2"), with the weak pull-up they had as
+unused pins: the board sees the same as with v2. Nothing new is driven.
+v4: 87 user I/Os: v2's 86 + `pad_d6` (port 2 data, input, weak pull-up as in v3).
+
 ## Simulation
+
+**v4 (23 Oct).** `make sim-snes-load` (62 frames): **PASS**. The PIC stand-in wakes on SELECT in
+two polls of any waveform and treats SELECT in its browser (pad registers) as BACK TO GAME.
+The keys' menu combination at +40 ms woke it, and the core kept it hidden (the menu view
+appeared only through the keys, `menu_t`); the second press, with the menu view up and the
+buttons released in between, was its BACK TO GAME; L+R+SELECT at +200 woke it again, hidden:
+0 frames of the PIC's screen without the keys before DOWN+SELECT, 0 pad reads with a button
+for the hidden PIC, the game got SELECT alone at +362. DOWN+SELECT at +380 showed it; the held
+SELECT didn't reach it (0s until the release), DOWN and Y then picked and sent the second file,
+second boot, SA-1 tests pass again, save RAM kept. Port 2 on pad_d6: A reaches the SNES's port 2
+latch, 512 port 2 clock pulses while the game had the pads.
+
+**v3 (23 Oct).** `make sim-snes-load` (62 frames, ~7 min): **PASS**. The PIC stand-in now
+behaves as the console did: it decodes only stock-shaped polls (LATCH < 10 us) and wakes on
+SELECT alone (two polls). Every v2 check passes as before (SA-1 tests twice, menu view by keys,
+status page, log view, second file, save RAM kept), and: the L+R+SELECT(+START) combinations
+and a lone SELECT at +362 ms reach the game (`pad_raw`) while the PIC ignores the 369 fast polls
+of the game; DOWN+SELECT at +380 switches to the stock waveform and the PIC wakes at +397.5 ms.
+Port 2: of the candidates (p2c[0] noise, [3] a copy of port 1's line, [9] a second 4021 pad,
+[20] flipping every 5 ms, the rest high) p2c[9] (E7) is taken, normal polarity, never another
+pin; A on pad 2 reaches the SNES's port 2 latch (0xFF7F), 736 port 2 clock pulses (the SA-1
+test's auto-read). Scan string at the end `T11c11111P1111111111T11111111` (the copy stays `c`).
+Status page with the PORT 2 row: `build/sim/snes_load-25.png`.
 
 **v2 (23 Oct).** `make sim-sdram-rom8`: the controller with the S-DSP stand-in on the ARAM port
 next to the SA-1 traffic: PASS at D_CLK 1, 3.5 and 6 ns (rise 4), fall 3.5 and rise 5 fail as
@@ -411,6 +477,16 @@ sets up the HDMI transmitter), and not again at the boot.
 
 ## Build results
 
+**v4 (23 Oct 2026):** Quartus 25.1 Lite, seed 1: `.cor` sha1 1055bef799a5…. 14,694 / 18,480 ALMs
+(80 %), 14,646 registers, 299 / 308 RAM blocks, 19 DSP blocks. **Timing met at all four corners**
+(worst setup +0.542 ns, hold +0.122 ns). Pin check: 87 user I/Os (v2's 86 + D6, input).
+
+**v3 (23 Oct 2026, the console run):** with the 29-pin scanner the 107 MHz SDRAM controller's
+paths missed by 0.02-0.40 ns at the slow corners in every build tried (seeds 1-4, "aggressive
+performance" mode; a LogicLock region for the controller was silently ignored by Lite); the
+seed-2 build (setup -0.070 ns at slow 85 C, -0.019 at slow 0 C) ran fine on the console. 115
+user I/Os.
+
 **v2 (23 Oct 2026):** `make out/q-snes_load.cor` (Quartus 25.1 Lite, ~25 min): `.cor` 2,632,660
 bytes, sha1 017a65cb0041…. 14,666 / 18,480 ALMs (79 %), 14,493 registers, **299 / 308 RAM
 blocks** (ARAM -64, BW-RAM +56, log +7), 19 DSP blocks. **Timing met at all four corners**
@@ -439,6 +515,23 @@ SDC), then the log's 8-entry compare and the ARAM forward counter by 0.5 ns (reg
   solved it with room to spare. A Quartus trap on the way: two PLL outputs with the same
   frequency and phase are merged, and the SDC's `*[2].*` clock name then matches nothing (all
   SDRAM I/O constraints silently dropped; warning 332174) — hence the 1-step SDRAM clock lead.
+
+## Console test (v4): one run
+
+Goal: SELECT alone stays with the game; DOWN+SELECT still opens the browser; player 2 still
+works. A pad in each port; the capture dongle recording if it is plugged in.
+
+1. Power on, Tools -> "Play SPC Files", load **2 Kirby Super Star**, start a game.
+2. Press **SELECT alone** a few times, hold it 2 s once: the game stays on screen (the PIC
+   may wake behind it). L+R+SELECT (status page): the OPTIONS row may say `view GAME+PIC`;
+   L+R+SELECT twice more to close.
+3. Play on a little with both pads (player 2 as in v3; SELECT on either pad goes to the game).
+4. **DOWN+SELECT** (hold 1 s, let go): the PIC's browser appears. Pick **4 Super Mario RPG**
+   (DOWN, Y): it loads and runs. DOWN+SELECT again, then SELECT in the browser (back to game):
+   Mario RPG continues.
+5. Power off (or leave v4 installed).
+
+## Console test (v3): one run (done 23 Oct, notes/hardware-tests.md)
 
 ## Console test (v2): one run
 

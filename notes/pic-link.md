@@ -397,6 +397,14 @@ cone of each output pin, `allpins.py`, `h15*.py` = the link-domain cycle model o
   different waveform (12 us latch, 32 x 6/6 us) and nobody pressed DOWN+SELECT; v2 drives the
   stock waveform (16.17 ms, 8.3 us latch, 33 x 0.6/18.7 us, notes/controllers.md) and passes
   the pad registers through all the time, as spc.cor does.
+- **Console (v2 run, 23 Oct):** DOWN+SELECT woke it, and so did **SELECT alone** (Denley,
+  playing Kirby Super Star): in "playing" mode the PIC reacts to SELECT on the lines (its
+  browser footer: SELECT = BACK TO GAME), not to the JB combination as such. In the v1 run, with
+  v1's poll waveform (1 kHz, 12 us latch, 6/6 us clocks), L+R+SELECT and L+R+START during Kirby
+  never woke it, so the PIC follows only polls shaped like the stock core's [guess]. **Wrong:**
+  in the v3 run SELECT alone woke it with v1's fast waveform too (forced FAST). It decodes any
+  waveform; the v1 run never tried SELECT without L+R. snes_load v4 instead keeps a PIC woken
+  without DOWN+SELECT hidden (notes/snes-load.md, "v4 in short").
 - Fallbacks if DOWN+SELECT doesn't wake it: the console's RESET button (read by the PIC), and
   the ID666 song length (a 20 s file: whatever the player does when a song ends shows up in
   v2's log). See notes/snes-load.md, "Console test (v2)".

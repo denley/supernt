@@ -1,8 +1,8 @@
 # Pins of quartus/snes_load (notes/snes-load.md): W16 clock input, the HDMI transmitter video/audio
 # pins and controller port 1 as quartus/snes/pins.tcl, the PIC32 link as quartus/hwtest/pins.tcl,
 # the x8 SDRAM pair's command/address/DQ/clock pins as quartus/hwtest, and AB10 (chip B's DQM)
-# driven low as spc.cor does. The DQM candidates / open-drain group are not used (left as weak
-# pull-up inputs, which hwtest v1-v6 showed harmless; spc.cor releases them).
+# driven low as spc.cor does; v4: controller port 2's data input D6 (below). All other pins are
+# unused (weak pull-up inputs).
 set_location_assignment PIN_W16 -to clk
 set_location_assignment PIN_M22 -to pclk
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to pclk
@@ -144,3 +144,8 @@ set_location_assignment PIN_W22 -to link_d[1]
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to link_d[1]
 set_location_assignment PIN_V21 -to link_d[0]
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to link_d[0]
+# Controller port 2 data (v4): D6, found by v3's scan of the pins spc.cor leaves unconfigured
+# (notes/controllers.md, "Port 2"); an input with the weak pull-up it had in v3 (as an unused
+# pin and as a scan candidate), the setting player 2 worked with.
+set_location_assignment PIN_D6 -to pad_d6
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to pad_d6

@@ -21,8 +21,9 @@ module tb #(parameter CAPTURE_HALF = 8, parameter TMPL_HEX = "diag.hex",
     input  wire       pic_drive,
     output wire [7:0] pic_din,
     output wire       link_oe,   // the core drives the bus
-    // controller port 1
+    // controller ports 1 and 2 (data lines; LATCH and CLOCK are shared)
     input  wire       pad_t12,
+    input  wire       pad_d6,
     output wire       pad_p14, pad_j13,
     output wire       pclk, s0, s1, s2,
     output wire [7:0] ch1, ch2, ch3
@@ -42,7 +43,7 @@ module tb #(parameter CAPTURE_HALF = 8, parameter TMPL_HEX = "diag.hex",
           .INIT_CYCLES(250)) dut (
         .clk(clk), .pclk(pclk), .s0(s0), .s1(s1), .s2(s2), .ch1(ch1), .ch2(ch2), .ch3(ch3),
         .aud_mclk(), .aud_bclk(), .aud_lrclk(), .aud_sdata(),
-        .pad_p14(pad_p14), .pad_j13(pad_j13), .pad_k16(), .pad_t12(pad_t12),
+        .pad_p14(pad_p14), .pad_j13(pad_j13), .pad_k16(), .pad_t12(pad_t12), .pad_d6(pad_d6),
         .link_a(pic_a), .link_nrd(pic_nrd), .link_nwr(pic_nwr), .link_d(link_d),
         .sd_clk(sd_clk), .sd_cs_n(sd_cs_n), .sd_ras_n(sd_ras_n), .sd_cas_n(sd_cas_n),
         .sd_we_n(sd_we_n), .sd_a(sd_a), .sd_ba(sd_ba), .sd_dq(sd_dq), .sd_dqm_b(sd_dqm_b));

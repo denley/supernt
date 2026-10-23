@@ -453,3 +453,19 @@ chord file was run (results below); the link part showed why nothing else could 
   waveform and follows the PIC's screen), then Super Mario RPG: new game, naming screen, intro,
   Bowser's Keep. Kirby's Dream Land 3 not in the recorded part (not confirmed). RESET not tried.
   Photo: `photos/snes-load-v2-2026-10-23.jpg`.
+
+- 23 Oct 2026, `14-q-snes_load` v3 (port 2 pin scan, AUTO poll timing; built from seed 2, setup
+  slack -0.07 ns at the slow corners, 115 user I/Os, pin check passes; v2 kept on the card as
+  `TESTCORES/90-q-snes_load-v2.cor`). Recording `~/scratch/cap/rec-20261023-165658.mkv`, status
+  page `photos/snes-load-v3-2026-10-23.jpg`:
+  - **Port 2's data line is D6** (8A), normal polarity (line low = pressed, as T12): PORT 2 row
+    `pin D6 normal pad FFFF0000 std`, scan `110110P10000111…` (M7 1, U12 1, U13 0, G11 1, H10 1,
+    L8 0, **D6 P**, D9 1, E10-G10 0, all open-drain pins 1). **Player 2 works** in Kirby Super
+    Star (user). So J13/K16 do clock port 2 too.
+  - **SELECT alone still woke the PIC** in the game, with AUTO (fast waveform in the game) and with
+    FAST (v1) forced: the PIC decodes the fast waveform too; v1's "L+R+SELECT never woke it" was
+    not evidence about the waveform. Fix in v4: the core keeps a PIC that wakes without
+    DOWN+SELECT hidden (notes/snes-load.md, "v4").
+- 23 Oct 2026, snes_load **v4 built** (not yet run): port 2 on D6 directly, a PIC woken without
+  DOWN+SELECT stays hidden behind the game; timing met (+0.542 ns), 87 user I/Os. Test:
+  notes/snes-load.md, "Console test (v4)".

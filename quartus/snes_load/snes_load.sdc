@@ -118,6 +118,6 @@ set_output_delay -clock pclk_out -max 1.5 $video_out
 set_output_delay -clock pclk_out -min -1.0 $video_out
 set_false_path -to [get_ports {aud_mclk aud_bclk aud_lrclk aud_sdata}]
 set_false_path -to [get_ports {pad_p14 pad_j13 pad_k16}]
-set_false_path -from [get_ports {pad_t12}]
+set_false_path -from [get_ports {pad_t12 pad_d6}]
 
 derive_clock_uncertainty

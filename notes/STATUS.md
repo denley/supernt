@@ -24,8 +24,14 @@ How it's used:
   the card's `SNES/` folder) and a line in `tools/sdcore roms`.
 - **DOWN+SELECT** (the JB menu combo; the PIC watches the pad lines itself) brings the browser
   back to load another game without a power cycle. **L+R+SELECT** shows our status/log page.
+  In v2/v3, SELECT alone did that too (the PIC reacts to SELECT); v4 hides that (below).
 - After the transfer the core checks the ROM in SDRAM against the file's CRC-32 and shows
   "INFO CRC: OK" before booting.
+
+**Player 2 works** (v3, 23 Oct: port 2's data line is D6, found by a pin scan). **v4** (built 23
+Oct, not yet on the console; test: `notes/snes-load.md`, "Console test (v4)") reads D6 directly
+and keeps SELECT alone for the game: the PIC wakes on SELECT whatever we do, so the core keeps a
+PIC woken without DOWN+SELECT hidden behind the game (no buttons for it) until DOWN+SELECT.
 
 Limits now: saves are kept only while powered and only for the last game loaded (the SPC
 player context has no way to write files to SD); 64 KB save RAM, ROMs up to 6 MB; no Super FX,
@@ -40,7 +46,7 @@ Card" loader, BIOS files are on the card in `/BIOS`).
   (`notes/snes-quartus.md`).
 - Audio: I2S into the AD9889B, confirmed (`notes/audio.md`).
 - Controller port 1: T12 data, P14 latch, J13+K16 clock (`notes/controllers.md`, "Link
-  registers" for the pad bytes the PIC reads).
+  registers" for the pad bytes the PIC reads). Port 2: data on D6 (same LATCH/CLOCK).
 - PIC32 link (bank 4A, `notes/pic-link.md`): 8-bit slave port; status poll at `0x2004_0000`
   must read 02; PIC UI loop reads the pad at `0x2000/0x2001`; its screen is a 64×32 2-byte-cell
   text map at `0x1018_0000`; **a run file arrives verbatim at link address `0x0000_FF00` + file

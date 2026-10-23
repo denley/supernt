@@ -419,7 +419,8 @@ SNES_LOAD_FRAMES ?= 62
 SNES_LOAD_SV := quartus/snes_load/sim/tb.sv quartus/snes_load/snes_load_top.sv \
   quartus/snes_sdram/snes_sdram_core.sv quartus/snes/snes_video.sv quartus/common/i2s_out.sv \
   quartus/common/sdram_rom8.sv quartus/common/link_ui.sv quartus/common/rom_loader.sv \
-  quartus/common/pad_poll.sv quartus/common/overlay.sv quartus/snes_sdram/sim/sim_models.v \
+  quartus/common/pad_poll.sv quartus/common/overlay.sv \
+  quartus/snes_sdram/sim/sim_models.v \
   quartus/snes_sdram/sim/ddio_model.v quartus/snes_sdram/sim/sdram_cyc.v \
   quartus/snes_load/sim/sim_models.v $(SNES_UP)/main.v
 

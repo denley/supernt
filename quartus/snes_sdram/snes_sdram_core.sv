@@ -46,10 +46,15 @@ module snes_sdram_core #(
     output wire        v224,         // 224-line mode (overscan off)
     output wire [15:0] audio_l, audio_r,
     // controller port lines, core polarity: strobe = latch (active high), clk = 1 while a
-    // clock pulse is in progress (the real line is low then), d0 = port 1 data as on the pin
+    // clock pulse is in progress (the real line is low then), d0 = port 1 data as on the pin;
+    // joy_clk = either port's clock, joy1_clk/joy2_clk per port, joy2_d0 = port 2 data (1 =
+    // nothing pressed, no pad)
     output wire        joy_strb,
     output wire        joy_clk,
+    output wire        joy1_clk,
+    output wire        joy2_clk,
     input  wire        joy1_d0,
+    input  wire        joy2_d0,
     // ARAM outside (ARAM_EXT = 1): the S-DSP/SPC700's 64 KB as an SDRAM port (sdram_rom8.sv):
     // address, write data, read this cycle, write at the next edge; the byte read comes back on
     // ext_aram_q at least 13 clk_mem (2.6 clk_sys) later and the DSP takes it >= 5 clk_sys after
@@ -85,7 +90,6 @@ module snes_sdram_core #(
     wire [7:0]  aram_d, aram_q;
     wire        aram_ce_n, aram_oe_n, aram_we_n;
 
-    wire joy1_clk, joy2_clk;
     assign joy_clk = joy1_clk | joy2_clk;
 
     main #(
@@ -122,8 +126,8 @@ module snes_sdram_core #(
         .R(r), .G(g), .B(b),
         .HBLANKn(hde), .VBLANKn(vde), .HSYNC(), .VSYNC(), .HVCNT_ATZERO(),
 
-        // Port 1 D0 from the pad, D1 and port 2 idle high (no buttons pressed).
-        .JOY1_DI({1'b1, joy1_d0}), .JOY2_DI(2'b11), .JOY_STRB(joy_strb), .JOY1_CLK(joy1_clk),
+        // D0 of both ports from the pads, the D1 lines idle high.
+        .JOY1_DI({1'b1, joy1_d0}), .JOY2_DI({1'b1, joy2_d0}), .JOY_STRB(joy_strb), .JOY1_CLK(joy1_clk),
         .JOY2_CLK(joy2_clk),
         .JOY1_P6(), .JOY2_P6(), .JOY2_P6_in(1'b1), .SNI_JOY(),
 

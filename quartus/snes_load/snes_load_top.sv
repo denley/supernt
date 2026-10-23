@@ -14,10 +14,17 @@
 //     controller at 5 x clk_sys; v2: the SPC700's 64 KB ARAM lives in SDRAM bank 3 too (the
 //     controller's ARAM port), which frees the block RAM for 64 KB of BW-RAM/SRAM (kept when
 //     the same game is loaded again, cleared for another); video/audio as quartus/snes.
-// Controller port 1 is polled by pad_poll.sv only (v2: the stock core's waveform by default);
-// the SNES gets the bits through a virtual 4021 (as MiSTer's ioport.sv) unless the menu view is
-// up, the PIC through 0x2000/0x2001 (v2: always, as the stock core does; option: only while the
-// menu view is up, as v1).
+// Controller port 1 is polled by pad_poll.sv only; the SNES gets the bits through a virtual 4021
+// (as MiSTer's ioport.sv) unless the menu view is up, the PIC through 0x2000/0x2001 (v2: always,
+// as the stock core does; option: only while the menu view is up, as v1).
+// v4: port 2 (data on D6, found by v3's pin scan; LATCH and CLOCK shared with port 1), a second
+// virtual 4021 for the SNES. And SELECT alone stays the game's: the PIC watches the controller
+// lines itself and wakes on SELECT (v2/v3 console runs, with either poll waveform), so the core
+// decides what is shown: a PIC that wakes while DOWN+SELECT is (or was within 1.5 s) held is
+// shown at once (the JB menu combination); one that wakes on anything else stays hidden behind
+// the game, gets no buttons (pad registers 0) and is shown when DOWN+SELECT is pressed. Whenever
+// the PIC's screen comes up during a game, the PIC gets no buttons until all are released (a
+// SELECT still held would be its BACK TO GAME).
 // Views: the game; the menu view (the PIC's screen at 0x1018_0000: its file browser or menu),
 // shown by itself before a game, while the PIC is active after a game started (v2 "follow": any
 // UI-loop or screen write within the last 600 ms) or toggled by L+R+SELECT+START (1 s); the
@@ -53,7 +60,8 @@ module top #(
     parameter integer COMBO_MS = 500,
     parameter integer MENU_MS = 1000,       // L+R+SELECT+START
     parameter integer FOLLOW_MS = 600,      // the PIC counts as active this long after a UI write
-    parameter integer INIT_CYCLES = 21450
+    parameter integer INIT_CYCLES = 21450,
+    parameter integer WAKE_MS = 1500        // a PIC waking this long after DOWN+SELECT is shown
 ) (
     input  wire       clk,      // W16, 74.25 MHz
     output wire       pclk,     // M22
@@ -65,6 +73,7 @@ module top #(
     output wire       pad_j13,
     output wire       pad_k16,
     input  wire       pad_t12,
+    input  wire       pad_d6,   // controller port 2 data
     // PIC32 link
     input  wire [2:0] link_a,   // AB20 AA20 AA19
     input  wire       link_nrd, // U21
@@ -92,15 +101,18 @@ module top #(
     // ================================================================ controller port 1
     wire [31:0] pad_raw, pad_polls;
     wire        pad_std, pad_clk;
+    wire [31:0] p2_raw /* verilator public_flat_rd */;
+    wire        p2_std /* verilator public_flat_rd */;
     reg         opt_fast = 1'b0;                     // clk_vid: v1 pad timing
     reg         opt_gate = 1'b0;                     // clk_vid: v1 PIC pad gating
     reg         opt_follow = 1'b1;                   // clk_vid: show the PIC's screen when it is active
     pad_poll #(.START_US(PAD_START_US)) padp (
-        .clk(clk_vid), .fast(opt_fast), .p14(pad_p14), .j13k16(pad_clk), .t12(pad_t12), .raw(pad_raw),
-        .is_std(pad_std), .polls(pad_polls));
+        .clk(clk_vid), .fast(opt_fast), .p14(pad_p14), .j13k16(pad_clk), .t12(pad_t12), .d6(pad_d6),
+        .raw(pad_raw), .is_std(pad_std), .raw2(p2_raw), .is_std2(p2_std), .polls(pad_polls));
     assign pad_j13 = pad_clk;
     assign pad_k16 = pad_clk;
-    wire [11:0] btn = pad_std ? pad_raw[11:0] : 12'd0;
+    wire [11:0] btn  = pad_std ? pad_raw[11:0] : 12'd0;
+    wire [11:0] btn2 = p2_std ? p2_raw[11:0] : 12'd0;
 
     // ================================================================ PIC32 link
     wire [7:0]  link_dout;
@@ -253,7 +265,7 @@ module top #(
     wire [7:0]  r, g, b;
     wire        dotclk, hde, vde, high_res, v224;
     wire [15:0] audio_l /* verilator public_flat_rd */, audio_r;
-    wire        joy_strb, joy_clk, joy_d0;
+    wire        joy_strb, joy1_clk, joy2_clk /* verilator public_flat_rd */, joy_d0, joy2_d0;
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [1:0]  clr_sync = 2'b00;
     always @(posedge clk_sys) clr_sync <= {clr_sync[0], ram_clear};
@@ -264,32 +276,45 @@ module top #(
         .sysclkf_ce(sysclkf_ce), .sysclkr_ce(sysclkr_ce),
         .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde), .high_res(high_res),
         .v224(v224), .audio_l(audio_l), .audio_r(audio_r),
-        .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_d0(joy_d0),
-        .ext_aram_addr(aram_addr), .ext_aram_d(aram_d), .ext_aram_rd(aram_rd), .ext_aram_wr(aram_wr),
+        .joy_strb(joy_strb), .joy_clk(), .joy1_clk(joy1_clk), .joy2_clk(joy2_clk),
+        .joy1_d0(joy_d0), .joy2_d0(joy2_d0), .ext_aram_addr(aram_addr), .ext_aram_d(aram_d), .ext_aram_rd(aram_rd), .ext_aram_wr(aram_wr),
         .ext_aram_q(aram_q), .bsram_clr(clr_sync[1] & core_reset), .bsram_clr_done());
 
-    // virtual controller (MiSTer ioport.sv): {B Y SELECT START UP DOWN LEFT RIGHT A X L R 0000},
-    // latched on the strobe, shifted at the start of each clock pulse, 0 on the line = pressed
-    reg        snes_pad_v = 1'b0;                    // clk_vid: the SNES gets the pad
+    // virtual controllers (MiSTer ioport.sv): {B Y SELECT START UP DOWN LEFT RIGHT A X L R 0000},
+    // latched on the strobe, shifted at the start of each clock pulse of their port, 0 on the
+    // line = pressed; then 0s (a pad's 1s after 16 bits). Port 2 without a pad: the line stays
+    // high (reads 0 throughout, as an empty port).
+    reg        snes_pad_v /* verilator public_flat_rd */ = 1'b0;   // clk_vid: the SNES gets the pads
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
-    reg [11:0] pad_s1 = 12'd0, pad_s2 = 12'd0;
+    reg [11:0] pad_s1 = 12'd0, pad_s2 = 12'd0, pad2_s1 = 12'd0, pad2_s2 = 12'd0;
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
-    reg [1:0]  pad_en_s = 2'b00;
-    reg [15:0] joy_lat = 16'hffff;
-    reg        joy_clk_d = 1'b0;
-    wire [11:0] pb = pad_en_s[1] ? pad_s2 : 12'd0;
+    reg [1:0]  pad_en_s = 2'b00, p2_on_s = 2'b00;
+    reg [15:0] joy_lat = 16'hffff, joy2_lat /* verilator public_flat_rd */ = 16'hffff;
+    reg        joy1_clk_d = 1'b0, joy2_clk_d = 1'b0;
+    wire [11:0] pb  = pad_en_s[1] ? pad_s2 : 12'd0;
+    wire [11:0] pb2 = pad_en_s[1] ? pad2_s2 : 12'd0;
     always @(posedge clk_sys) begin
         pad_s1 <= btn;
         pad_s2 <= pad_s1;
+        pad2_s1 <= btn2;
+        pad2_s2 <= pad2_s1;
         pad_en_s <= {pad_en_s[0], snes_pad_v};
-        joy_clk_d <= joy_clk;
+        p2_on_s <= {p2_on_s[0], p2_std};
+        joy1_clk_d <= joy1_clk;
+        joy2_clk_d <= joy2_clk;
         if (joy_strb)
             joy_lat <= ~{pb[0], pb[1], pb[2], pb[3], pb[4], pb[5], pb[6], pb[7], pb[8], pb[9],
                          pb[10], pb[11], 4'b0000};
-        else if (!joy_clk_d && joy_clk)
+        else if (!joy1_clk_d && joy1_clk)
             joy_lat <= {joy_lat[14:0], 1'b0};
+        if (joy_strb)
+            joy2_lat <= ~{pb2[0], pb2[1], pb2[2], pb2[3], pb2[4], pb2[5], pb2[6], pb2[7], pb2[8],
+                          pb2[9], pb2[10], pb2[11], 4'b0000};
+        else if (!joy2_clk_d && joy2_clk)
+            joy2_lat <= {joy2_lat[14:0], 1'b0};
     end
-    assign joy_d0 = joy_lat[15];
+    assign joy_d0  = joy_lat[15];
+    assign joy2_d0 = p2_on_s[1] ? joy2_lat[15] : 1'b1;
 
     // SNES frames (for the diagnostics page)
     reg [31:0] snes_frames = 32'd0;
@@ -318,12 +343,25 @@ module top #(
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
     reg [1:0] pic_act_v = 2'b00;
     always @(posedge clk_vid) pic_act_v <= {pic_act_v[0], pic_act_m};
-    wire follow_on = opt_follow && pic_act_v[1];
-
-    // button combinations, exact (no other button held), held for COMBO_MS / MENU_MS
     reg [16:0] mdiv = 17'd0;
     wire       ms_tick = mdiv == 17'd74249;
     always @(posedge clk_vid) mdiv <= ms_tick ? 17'd0 : mdiv + 17'd1;
+    // v4: the woken PIC is shown only after DOWN+SELECT (pic_shown); otherwise it stays hidden
+    reg        pic_shown /* verilator public_flat_rd */ = 1'b0;
+    reg        pic_act_d = 1'b0;
+    reg [10:0] dsel = 11'd0;                         // ms left in which a waking PIC is shown
+    wire       dsel_now = btn[5] && btn[2];          // DOWN + SELECT (other buttons allowed)
+    always @(posedge clk_vid) begin
+        pic_act_d <= pic_act_v[1];
+        if (dsel_now) dsel <= WAKE_MS[10:0];
+        else if (ms_tick && dsel != 11'd0) dsel <= dsel - 11'd1;
+        if (!pic_act_v[1]) pic_shown <= 1'b0;
+        else if (!pic_act_d) pic_shown <= dsel_now || dsel != 11'd0;
+        else if (dsel_now) pic_shown <= 1'b1;
+    end
+    wire follow_on = opt_follow && pic_act_v[1] && pic_shown;
+
+    // button combinations, exact (no other button held), held for COMBO_MS / MENU_MS
     localparam [11:0] B_SEL = 12'h004, B_START = 12'h008, B_UP = 12'h010, B_DOWN = 12'h020,
                       B_LEFT = 12'h040, B_A = 12'h100, B_L = 12'h400, B_R = 12'h800;
     localparam [11:0] LR = B_L | B_R;
@@ -337,7 +375,7 @@ module top #(
     reg [2:0]  held = 3'd0;                         // the combination acted on (until released)
     reg [2:0]  combo_d = 3'd0;
     reg [1:0]  diag_v = 2'd0;                       // 0 off, 1 status page, 2 log view
-    reg        menu_t = 1'b0;                       // menu view by the keys
+    reg        menu_t /* verilator public_flat_rd */ = 1'b0;   // menu view by the keys
     wire [10:0] need = combo == 3'd2 ? MENU_MS[10:0] : COMBO_MS[10:0];
     always @(posedge clk_vid) begin
         combo_d <= combo;
@@ -369,8 +407,15 @@ module top #(
     wire [1:0] mode /* verilator public_flat_rd */ = diag_v == 2'd2 ? 2'd3 :
                       forced || diag_v == 2'd1 || (st_v == S_FAIL && !menu_t) ? 2'd2 :
                       menu_up ? 2'd1 : 2'd0;
+    // v4: during a game the PIC gets buttons only while its screen is shown, and only once all
+    // buttons held when it came up are released
+    reg menu_up_d = 1'b0, rel_wait = 1'b0;
     always @(posedge clk_vid) begin
-        pic_pad_v  <= !opt_gate || (menu_up && !forced) || st_v == S_IDLE || st_v == S_NOTROM;
+        menu_up_d <= menu_up;
+        if (st_v == S_RUN && menu_up && !menu_up_d) rel_wait <= 1'b1;
+        else if (btn == 12'd0) rel_wait <= 1'b0;
+        pic_pad_v  <= (!opt_gate || (menu_up && !forced) || st_v == S_IDLE || st_v == S_NOTROM) &&
+                      !(st_v == S_RUN && (!menu_up || rel_wait));
         snes_pad_v <= st_v == S_RUN && !menu_up;
         accept_v   <= menu_up && st_v == S_RUN;
     end
@@ -455,7 +500,8 @@ module top #(
     assign st[47] = last_game;
     assign st[48] = {23'd0, log_a_n};
     genvar gi;
-    generate for (gi = 49; gi < 56; gi = gi + 1) begin : g_st0
+    assign st[49] = p2_raw;
+    generate for (gi = 50; gi < 56; gi = gi + 1) begin : g_st0
         assign st[gi] = 32'd0;
     end endgenerate
     wire [1791:0] stat;
@@ -528,7 +574,8 @@ module top #(
         s_opt = {opt_fast ? "UP poll FAST (v1) " : "UP poll STOCK     ",
                  opt_gate ? "DOWN pad GATED (v1) " : "DOWN pad ALWAYS     ",
                  opt_follow ? "LEFT follow ON   " : "LEFT follow OFF  ",
-                 st_v != S_RUN ? "               " : !menu_up ? "view GAME      " :
+                 st_v != S_RUN ? "               " :
+                 !menu_up ? (pic_act_v[1] ? "view GAME+PIC  " : "view GAME      ") :
                  menu_t ? "view MENU(keys)" : "view MENU(PIC) "};
         s_ram = {ram_mask == 24'd0 ? "none (header RAM size 0)                " :
                  ld_state < S_SHOW || ld_state == S_NOTROM ? "64 KB block RAM                         " :
@@ -544,6 +591,7 @@ module top #(
             5'd11:   ext_s <= ch(s_ver, ext_col - 7'd35);
             5'd15:   ext_s <= chn(s_ram, ext_col - 7'd16);
             5'd16:   ext_s <= chn(s_opt, ext_col - 7'd9);
+            5'd17:   ext_s <= ch(p2_std ? "std pad                 " : "no pad                  ", ext_col - 7'd31);
             5'd18:   ext_s <= ext_col < 7'd60 ?
                          ch(mode == 2'd3 ? "20 per page, auto paging" : "2 newest below          ", ext_col - 7'd14) :
                          mode != 2'd3 ? 8'h20 :
