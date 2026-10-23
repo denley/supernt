@@ -478,4 +478,5 @@ chord file was run (results below); the link part showed why nothing else could 
   `20010000`, 2 bytes, 0x70F repeats from T 0x208E to 0x1093B: **the PIC polls the pad registers
   over the link while a game runs** (notes/pic-link.md, "Correction"), and v4 answered 0.
 - 23 Oct 2026, snes_load **v5 built** (seed 2, timing met +0.457 ns): pad registers pass
-  DOWN+SELECT during games (else 0).
+  DOWN+SELECT during games (else 0). Installed on the card as `14-q-snes_load`; v4 kept as
+  `TESTCORES/92-q-snes_load-v4.cor`.
