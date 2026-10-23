@@ -67,8 +67,10 @@ S-DSP/SPC700's address and data from clk_sys, the write queue and forwarding com
   clk_sys -> clk_mem setups when there is a lag), a multicycle 2 from the ARAM write queue to
   upd/upd_d/upd_tag (they load only at k = 2; the queue changes only at k = 0 and 2), and
   `rom_loader`'s end-of-transfer compares registered (they became critical).
-Result (`out/q-snes_load.cor`, commit d388532): **clk_mem -0.48 ns at slow 85 °C, -0.23 ns at
-slow 0 °C**, everything else met, pins checked. The remaining paths run from the ARAM sample's
+Result after a fitter-only 0.15 ns hold margin on clk_sys -> clk_mem (commit 5fc9bbb; the
+snes_gsu build had a 41 ps hold miss without it): **clk_mem setup -0.27 ns at slow 85 °C, -0.03
+ns at slow 0 °C**, hold met everywhere, pins checked (`TESTCORES/16-q-snes_load-v7.cor`). The
+Super FX-only build meets everything (clk_mem +0.28 / +0.39 ns; `17-q-snes_gsu.cor`). The remaining paths run from the ARAM sample's
 own state and the SPC700 into the write queue registers. At room temperature and typical
 silicon this is likely to work, but it isn't guaranteed. The real fix is to pipeline the ARAM
 sample (register the port at k = 2, decide at k = 3), which needs care: a read completion at k = 3
