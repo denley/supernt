@@ -70,9 +70,12 @@ Card" loader, BIOS files are on the card in `/BIOS`).
    "v7 in short") adds the GSU next to the SA-1 in one core (87 % ALMs, 300 M10K; GSU RAM in the
    64 KB block-RAM BSRAM, ROM through the same 8-bit SDRAM). It needed a patch to GSU.vhd (its
    ROM address holds while it isn't reading ROM; ROM_RD_N becomes a refresh hint). In
-   simulation both games reach their Super FX intros as in Mesen2; not yet on the console
-   (test: `notes/hardware-tests.md`, "Next session: snes_load v7"). G1 (16 MB, `notes/sdram.md`)
-   isn't needed for this: the GSU's RAM fits the block RAM.
+   simulation both games reach their Super FX intros as in Mesen2 (Star Fox's 3D Arwings, Yoshi's
+   "A long, long time ago..."); not yet on the console (test: `notes/hardware-tests.md`, "Next
+   session: snes_load v7"; the card boots the Super FX-only core with the case III fixes, timing
+   met). The combined SA-1 + Super FX core misses clk_mem setup by 0.1-0.3 ns at slow 85 °C;
+   v7.2 (branch `v72` in `~/scratch/v71wt`, unverified on Quartus) registers the ARAM port to fix
+   that. G1 (16 MB, `notes/sdram.md`) isn't needed for this: the GSU's RAM fits the block RAM.
 2. Optional: DSP-1 in our core (small; vendor `DSPn`), larger ROMs, more games.
 3. Not possible (decoded): saves to SD from the SPC player context.
 
