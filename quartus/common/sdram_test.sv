@@ -31,13 +31,20 @@
 //   15      stock (again)
 // If chip A needs exactly one of the pins at its stock level, it passes in 0, 12-15, fails in
 // 1, and hypotheses 2-11 spell out the pin's index (bit k = 1: fails in 2+k, passes in 7+k).
+//
+// FIXED_STOCK = 1 (quartus/memtest): every pass uses the stock levels (hypothesis 0's pins),
+// and a pass only starts on a `start` pulse, so the caller can switch other pins between
+// passes; `pass_done` pulses after each pass with its error counts in `last_err`. hwtest ties
+// `start` high (free-running, as before).
 module sdram_test #(
     parameter [11:0] MRS_PINS = 12'h037,  // a[k] high for spc's MRS pattern
     parameter [11:0] ROWS     = 12'd4095, // last row tested (simulation uses fewer)
     parameter [15:0] INIT_NOP = 16'd20000, // NOP cycles before the init sequence (~270 us)
-    parameter integer NTIE    = 19
+    parameter integer NTIE    = 19,
+    parameter integer FIXED_STOCK = 0
 ) (
     input  wire        clk,
+    input  wire        start,           // a pass starts at the first start after the last one
     output wire        sd_clk,          // AB11 (DDIO, inverted clk)
     output wire        sd_cs_n,         // command pins: from sd_cmd (NOP-high at power-up)
     output wire        sd_ras_n,
@@ -56,7 +63,9 @@ module sdram_test #(
     output reg  [3:0]  hyp = 4'd0,      // hypothesis of the pass running now
     input  wire [3:0]  hsel,            // hypothesis shown in err_row/raw_row (1 clock later)
     output reg  [191:0] err_row = 192'd0, // 8 x 24: chip A f3.5 r4 f4.5 r5, chip B the same
-    output reg  [159:0] raw_row = 160'd0  // {hyp passes, idle, exp1, exp0, raw r7..r2} x 16
+    output reg  [159:0] raw_row = 160'd0, // {hyp passes, idle, exp1, exp0, raw r7..r2} x 16
+    output wire        pass_done,       // pulses when last_err holds the pass just finished
+    output reg  [191:0] last_err = 192'd0 // that pass's error counts (layout as err_row)
 );
     // ---------------------------------------------------------------- pin hypotheses
     function [NTIE-1:0] rel_mask(input [3:0] h);
@@ -68,9 +77,9 @@ module sdram_test #(
                               (h >= 4'd7 && h <= 4'd11) ? !((i >> (h - 7)) & 1) : 1'b0;
         end
     endfunction
-    assign tie_rel = rel_mask(hyp);
-    assign ab10    = hyp == 4'd13;
-    assign od_low  = hyp == 4'd14 ? 8'hFF : hyp == 4'd12 ? 8'h01 : 8'h00;
+    assign tie_rel = FIXED_STOCK ? {NTIE{1'b0}} : rel_mask(hyp);
+    assign ab10    = !FIXED_STOCK && hyp == 4'd13;
+    assign od_low  = FIXED_STOCK ? 8'h00 : hyp == 4'd14 ? 8'hFF : hyp == 4'd12 ? 8'h01 : 8'h00;
 
     altddio_out #(
         .extend_oe_disable("OFF"), .intended_device_family("Cyclone V"),
@@ -122,6 +131,9 @@ module sdram_test #(
     reg        pass_end = 1'b0;         // one clock after the last read burst of a pass
     reg        raw_go = 1'b0;           // READ of bank 0 row 0 issued this cycle
     reg        idle_go = 1'b0;          // a quiet cycle in the read phase (nobody drives)
+    reg        armed = 1'b0;            // start seen since the last pass began
+    reg        pass_done_r = 1'b0;      // pass_end delayed to when last_err holds that pass
+    assign pass_done = pass_done_r;
     // read-expectation stream: valid/expected word for the column the READ produces, cycle by
     // cycle from the READ command on (e[k] = k cycles later)
     reg        rv0 = 1'b0;
@@ -138,11 +150,13 @@ module sdram_test #(
         pass_end <= 1'b0;
         raw_go <= 1'b0;
         idle_go <= 1'b0;
+        if (start) armed <= 1'b1;
         if (wait_c != 16'd0) begin
             wait_c <= wait_c - 16'd1;
             if (st == S_ACT && !writing && wait_c == 16'd3) idle_go <= 1'b1;
         end else case (st)
-            S_INIT: begin                   // precharge each bank (A10 = 0)
+            S_INIT: if (n != 4'd0 || armed || start) begin  // precharge each bank (A10 = 0)
+                if (n == 4'd0) armed <= 1'b0;
                 cmd(C_PRE); sd_ba <= n[1:0]; n <= n + 4'd1; wait_c <= 16'd4;
                 if (n == 4'd3) begin st <= S_IREF; n <= 4'd0; end
             end
@@ -247,6 +261,7 @@ module sdram_test #(
     reg        clr = 1'b0;
     always @(posedge clk) begin
         clr <= 1'b0;
+        pass_done_r <= pass_end;
         for (k = 0; k < 8; k = k + 1)
             if (clr) pe[k] <= 24'd0;
             else if (miss[k]) pe[k] <= pe[k] + 24'd1;
@@ -263,6 +278,7 @@ module sdram_test #(
         // end of pass: store this hypothesis's results, clear the pass counters, next hypothesis
         if (pass_end) begin
             err_mem[hyp] <= {pe[7], pe[6], pe[5], pe[4], pe[3], pe[2], pe[1], pe[0]};
+            last_err <= {pe[7], pe[6], pe[5], pe[4], pe[3], pe[2], pe[1], pe[0]};
             raw_mem[hyp] <= {ph[hyp] + 16'd1, idle_now, e1, e0, rs[5], rs[4], rs[3], rs[2], rs[1], rs[0]};
             ph[hyp] <= ph[hyp] + 16'd1;
             hyp <= hyp + 4'd1;

@@ -427,10 +427,10 @@ module top #(
     end endgenerate
     assign tie_hold = HOLD_LEVEL;
     sdram_test #(.ROWS(SD_ROWS)) sdram (
-        .clk(clk), .sd_clk(sd_clk), .sd_cs_n(sd_cs_n), .sd_ras_n(sd_ras_n), .sd_cas_n(sd_cas_n),
+        .clk(clk), .start(1'b1), .sd_clk(sd_clk), .sd_cs_n(sd_cs_n), .sd_ras_n(sd_ras_n), .sd_cas_n(sd_cas_n),
         .sd_we_n(sd_we_n), .sd_a(sd_a), .sd_ba(sd_ba), .sd_dq_in(sd_dq), .sd_dq_out(sdq_out),
         .sd_dq_oe(sdq_oe), .ab10(s_ab10), .od_low(s_odl), .tie_rel(s_rel), .passes(s_passes),
-        .hyp(s_hyp), .hsel(s_hsel), .err_row(s_err), .raw_row(s_raw));
+        .hyp(s_hyp), .hsel(s_hsel), .err_row(s_err), .raw_row(s_raw), .pass_done(), .last_err());
 
     // ---------------------------------------------------------------- status words
     assign st[0]  = frames;

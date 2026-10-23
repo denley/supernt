@@ -35,6 +35,30 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session: memtest v1 (prepared 23 Oct)
+
+Tests all three SDRAM chips with the revised map (`notes/sdram.md`, "Which chip is which",
+"Controller 2", "memtest v1"): U4 (the bus our SNES core uses: does byte A answer with C13/C15
+low?) and, for the first time, the IS42S81600F pair U5/U16 on the top-bank bus. Hands-free;
+~1 s per hypothesis, 4 hypotheses per round, results stay on screen.
+
+1. Card into homebox, mount, then `cp out/q-memtest.cor /mnt/sd/TESTCORES/15-q-memtest.cor`
+   (from the checkout that built it) and `tools/sdcore use 15`; `sync; sudo umount /mnt/sd`.
+2. Start `tools/capview.py`.
+3. Denley: card in the console, Tools → Play SPC Files, pick any file. Leave it ~30 s (both
+   pages, 6 s each, shown a few times). Then card back to homebox; `tools/sdcore use 14`
+   restores the SNES core.
+
+Reading it (page 1/2; hex):
+- U4 table: **B f3.5 and B r4 = 000000** in every row (as hwtest v3); anything else = the
+  core is broken, ignore the rest. **A**: a row with 000000 at f3.5/r4 names chip A's DQM
+  (row 1 both low; 2 C13; 3 C15). ~7F8000 everywhere = still not found.
+- U5/U16 table: per chip, 0000000 at one or two neighbouring capture points (f3.5/r4
+  expected) = **the chip works**. If only rows with C13 or C15 low are clean, that pin is the
+  pair's DQM. ~0FF0000 at every point in every row = the chip doesn't answer: see page 2.
+- Page 2: column walk 000 at the clean capture point = column addressing right; raw words: a
+  working chip shows the expected col 0 word at r4 (or r3/r5 if the timing differs from U4).
+
 ## Next session: q-snes_load (prepared 22 Oct)
 
 The SNES core that loads its ROM over the link (`notes/snes-load.md`; procedure in its "Console

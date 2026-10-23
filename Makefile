@@ -153,6 +153,33 @@ build/hwtest/sine.hex: tools/mksine.py
 	mkdir -p build/hwtest
 	python3 -I tools/mksine.py $@
 
+# Memory test core (quartus/memtest): all three SDRAM chips, C13/C15 hypotheses
+# (notes/sdram.md, "memtest"). Reuses hwtest's font.
+quartus/memtest/memtest.rbf: build/memtest/screen.hex build/hwtest/font.hex
+build/memtest/screen.hex: quartus/memtest/screen.txt tools/mkscreen.py
+	mkdir -p build/memtest
+	python3 -I tools/mkscreen.py $< $@
+
+# Unit simulation of quartus/common/mem2_test.sv (quartus/memtest/sim/tb_mem2.sv): normal, a
+# pull-up slower than the wait (group 2 must fail), a stuck column pin (column walk must see it).
+MEM2_SIM = quartus/memtest/sim/tb_mem2.sv quartus/memtest/sim/x8_model.v quartus/hwtest/sim/models.v \
+  quartus/common/mem2_test.sv
+sim-mem2: $(MEM2_SIM)
+	mkdir -p build/sim
+	set -e; for v in "" "-P tb_mem2.T_RISE=6000.0 -P tb_mem2.EXPECT_G2_FAIL=1" "-P tb_mem2.G2_STUCK=5"; do \
+	  iverilog -g2012 -s tb_mem2 $$v -o build/sim/mem2.vvp $(MEM2_SIM); \
+	  vvp -n build/sim/mem2.vvp | tee build/sim/mem2.log | grep -v finish; grep -q '^PASS' build/sim/mem2.log; done
+
+# Whole memtest core with SDRAM models (quartus/memtest/sim/tb.sv): one round of hypotheses.
+MEMTEST_SIM = quartus/memtest/sim/tb.sv quartus/memtest/sim/x8_model.v quartus/hwtest/sim/sdram_model.v \
+  quartus/hwtest/sim/models.v quartus/memtest/memtest_top.sv quartus/common/sdram_test.sv \
+  quartus/common/mem2_test.sv quartus/common/textmode.sv
+sim-memtest: build/memtest/screen.hex build/hwtest/font.hex $(MEMTEST_SIM)
+	mkdir -p build/sim
+	iverilog -g2012 -s tb -o build/sim/memtest.vvp $(MEMTEST_SIM)
+	cd build/sim && vvp -n memtest.vvp | tee memtest.log | grep -v finish
+	grep -q '^PASS' build/sim/memtest.log
+
 # Simulation of quartus/hwtest: a PIC32 stand-in on the link that sets up the video-PLL
 # reconfiguration block and polls the status like the console, then runs the SPC player's UI loop
 # (pad reads at 0x2000/0x2001) until the core's virtual presses reach START, and only then sends
@@ -485,7 +512,7 @@ FORCE:
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader \
+.PHONY: all clean FORCE sim-mem2 sim-memtest sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader \
   sim-sdram-rom8 sim-snes-load sim-snes-load-gradius sim-snes-load-kirby
 # (sim-snes-load-kdl3 / -smrpg come from the pattern rule; phony targets skip implicit rules)
 .SECONDARY:

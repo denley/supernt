@@ -23,10 +23,10 @@ module tb_sdram;
     wire [191:0] er;
     wire [159:0] raw;
     sdram_test #(.ROWS(12'd3), .INIT_NOP(16'd200)) dut (
-        .clk(clk), .sd_clk(sclk), .sd_cs_n(cs), .sd_ras_n(ras), .sd_cas_n(cas), .sd_we_n(we),
+        .clk(clk), .start(1'b1), .sd_clk(sclk), .sd_cs_n(cs), .sd_ras_n(ras), .sd_cas_n(cas), .sd_we_n(we),
         .sd_a(a), .sd_ba(ba), .sd_dq_in(dq), .sd_dq_out(dout), .sd_dq_oe(oe), .ab10(ab10),
         .od_low(odl), .tie_rel(rel), .passes(passes), .hyp(hyp), .hsel(hsel), .err_row(er),
-        .raw_row(raw));
+        .raw_row(raw), .pass_done(), .last_err());
     // chip A's DQM: tie pin CHIP_A_TIE, stock level 0, released = pulled up
     wire dqm_a = rel[CHIP_A_TIE];
     sdram_model mem (.clk(sclk), .cs_n(cs), .ras_n(ras), .cas_n(cas), .we_n(we), .dqm_a(dqm_a),

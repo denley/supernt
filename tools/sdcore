@@ -20,7 +20,7 @@ cd "$(dirname "$0")/.."
 
 # Test order; see notes/hardware-tests.md.
 ORDER="spc-colortest spc-invert-ch1 spc-invert-ch2 spc-invert-ch3 vtest q-vtest buslog q-buslog
-q-snes plltest blinky q-hwtest q-snes_sdram q-snes_load"
+q-snes plltest blinky q-hwtest q-snes_sdram q-snes_load q-memtest"
 
 [ -d "$SD/SYSTEM/CORES" ] || { echo "no Super Nt card at $SD" >&2; exit 1; }
 

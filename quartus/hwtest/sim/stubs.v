@@ -4,9 +4,10 @@
 `timescale 1ns/1ps
 module sdram_test #(
     parameter [11:0] MRS_PINS = 12'h037, parameter [11:0] ROWS = 12'd4095,
-    parameter [15:0] INIT_NOP = 16'd20000, parameter integer NTIE = 19
+    parameter [15:0] INIT_NOP = 16'd20000, parameter integer NTIE = 19,
+    parameter integer FIXED_STOCK = 0
 ) (
-    input  wire        clk,
+    input  wire        clk, start,
     output wire        sd_clk, sd_cs_n, sd_ras_n, sd_cas_n, sd_we_n,
     output wire [11:0] sd_a,
     output wire [1:0]  sd_ba,
@@ -19,12 +20,14 @@ module sdram_test #(
     output wire [3:0]  hyp,
     input  wire [3:0]  hsel,
     output wire [191:0] err_row,
-    output wire [159:0] raw_row
+    output wire [159:0] raw_row,
+    output wire        pass_done,
+    output wire [191:0] last_err
 );
     assign {sd_clk, sd_cs_n, sd_ras_n, sd_cas_n, sd_we_n} = 5'b01111;
     assign sd_a = 12'd0, sd_ba = 2'd0, sd_dq_out = 16'd0, sd_dq_oe = 1'b0, ab10 = 1'b0;
     assign od_low = 8'd0, tie_rel = {NTIE{1'b0}}, passes = 16'd0, hyp = 4'd0;
-    assign err_row = 192'd0, raw_row = 160'd0;
+    assign err_row = 192'd0, raw_row = 160'd0, pass_done = 1'b0, last_err = 192'd0;
 endmodule
 
 module pll_emul (

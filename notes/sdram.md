@@ -262,6 +262,33 @@ Other fabric-driven top-bank pins, from unrelated logic: G8 L7 (LABs y=44), F14 
 drain, 21.34 MHz domain); H18 ← CMUXVG.025.045.0 (FPLL.054.037 C7, 12.29 MHz) and J19 ←
 CMUXVG.025.045.2 (C5, 3.07 MHz) as clock outputs; input J18 via `IOINTDQDIN`.
 
+## memtest v1 (prepared 23 Oct 2026)
+
+`quartus/memtest` (`make out/q-memtest.cor`, card slot 15; procedure in
+`notes/hardware-tests.md`): one core that tests all three chips, results on two text pages.
+
+- **U4**: `sdram_test.sv` unchanged except `FIXED_STOCK` (every pass at spc.cor's levels: AB10
+  low, the 3A/3B/4A/7A constants at their level, the open-drain group released) and a `start`
+  input, so passes line up with the hypotheses. Errors per byte at f3.5 r4 f4.5 r5.
+- **U5/U16**: `quartus/common/mem2_test.sv`. Both chips get the same commands in the same
+  cycles on the decoded pins, at 74.25 MHz with the clock on H8 as the inverted clk (DDIO), as
+  AB11. MRS = N6 + R7 only (CL3, BL1 whichever of A4/A5 each is). Each pass: init, write all
+  4 × 4096 rows × 1024 columns with one WRITE per clock, read them back with one READ per clock,
+  then a column walk. Errors per chip at the same four capture points.
+- **Group 2's data pins stay as spc.cor has them (open drain)**: a line is driven low or
+  released to its weak pull-up, never driven high. So group 2 gets one byte per row, put on the
+  pins 300 clocks (4 µs) before the row's writes; the byte is a different nonzero constant
+  XORed in per bank/row bit, so any one- or two-bit row/bank aliasing shows. Group 1 (push-pull,
+  as stock) gets a different byte per column. The column walk (bank 1 row 5: columns 0, 1, 2,
+  4 … 512, each written with its own byte after the 4 µs wait, then read back) checks the column
+  address pins for group 2 too.
+- **Hypotheses**, one pass of both tests each: C13/C15 released / both low / C13 low / C15
+  low. Low is spc.cor's level outside the MRS; released is what every earlier core did.
+- Simulated: `make sim-mem2` (two x8 models, group 2's lines open drain with a 1 µs pull-up
+  rise: clean at f3.5/r4; a 6 µs rise makes group 2 fail; a stuck column pin shows in the
+  column walk) and `make sim-memtest` (whole core; models with U4 byte A's DQM on C15 and the
+  pair's on C13: the tables attribute both correctly).
+
 ## Constant pins: AB10 and the open-drain group (after hwtest v1, Oct 2026)
 
 hwtest v1 on the console (22 Oct, `notes/hardware-tests.md`): all eight capture points wrong on
