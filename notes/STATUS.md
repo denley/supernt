@@ -66,11 +66,13 @@ Card" loader, BIOS files are on the card in `/BIOS`).
 
 ## Next steps (agreed direction)
 
-1. **Super FX 1/2** (Star Fox, Yoshi's Island, both on the card): the vendor core has the GSU;
-   the work is memory. M10K is full (299/308: WRAM/VRAM live in block RAM), logic at 79 %, and
-   GSU games need 32–64 KB RAM plus fast ROM/RAM access that one 8-bit chip may not give.
-   Memory now available: G1 (16 MB, fully mapped) besides U4's byte B; G2 nearly mapped.
-   Next: one more probe for G2's bank pins, then put WRAM/GSU RAM in G1 and add the GSU.
+1. **Super FX 1/2** (Star Fox, Yoshi's Island): **snes_load v7** (24 Oct, `notes/snes-load.md`,
+   "v7 in short") adds the GSU next to the SA-1 in one core (87 % ALMs, 300 M10K; GSU RAM in the
+   64 KB block-RAM BSRAM, ROM through the same 8-bit SDRAM). It needed a patch to GSU.vhd (its
+   ROM address holds while it isn't reading ROM; ROM_RD_N becomes a refresh hint). In
+   simulation both games reach their Super FX intros as in Mesen2; not yet on the console
+   (test: `notes/hardware-tests.md`, "Next session: snes_load v7"). G1 (16 MB, `notes/sdram.md`)
+   isn't needed for this: the GSU's RAM fits the block RAM.
 2. Optional: DSP-1 in our core (small; vendor `DSPn`), larger ROMs, more games.
 3. Not possible (decoded): saves to SD from the SPC player context.
 

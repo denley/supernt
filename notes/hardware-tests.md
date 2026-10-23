@@ -35,6 +35,24 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session: snes_load v7, Super FX (prepared 24 Oct)
+
+The SNES core with the Super FX next to the SA-1 (`notes/snes-load.md`, "v7 in short"). In
+simulation Yoshi's Island reaches its Super FX-drawn Nintendo logo and Star Fox its starfield
+intro, both as in Mesen2; the SA-1 test, menu, second load and save RAM still pass.
+
+1. Card into homebox, mount; from the checkout that built it: `cp out/q-snes_load.cor
+   /mnt/sd/TESTCORES/14-q-snes_load.cor` (keep v6: `cp /mnt/sd/TESTCORES/14-q-snes_load.cor
+   /mnt/sd/TESTCORES/93-q-snes_load-v6.cor` first), `make load-spcs`, `tools/sdcore roms`
+   (adds "6 Yoshi's Island.spc", "7 Star Fox.spc"), `tools/sdcore use 14`; sync, umount.
+2. capview on; Denley: Play SPC Files, **6 Yoshi's Island**: the status page should say
+   "LoROM + SUPER FX" and "INFO CRC: OK", then the game: "Nintendo Presents", the stitched
+   Nintendo logo, the title; start a game and play a little (sound, the Super FX scaling in the
+   title / first level). Then DOWN+SELECT, **7 Star Fox**: intro (3D Arwing) and a bit of the
+   first level. Then **2 Kirby Super Star** or Super Mario RPG as an SA-1 check.
+3. If a Super FX game shows garbage or hangs while SA-1 games are fine: the GSU's ROM timing on
+   hardware (rom latency is 2-3 clk_sys in simulation) or the clk_mem timing (see "v7 build").
+
 ## memtest v3 (15-q-memtest, 23 Oct) results
 
 Run 23 Oct ~22:20 (`notes/sdram.md`, "memtest v3 result"): **G1 0 errors at f2.5/r3** in every

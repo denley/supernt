@@ -405,9 +405,13 @@ build/snes_load/SA1.vhd: $(SNES_UP)/chip/SA1/SA1.vhd quartus/snes_load/sa1_vbp.p
 	cp $< $@
 	patch -s $@ < quartus/snes_load/sa1_vbp.patch
 # GSU.vhd with quartus/snes_load/gsu_rom_hold.patch (v7: the GSU's ROM address holds while it
-# isn't reading ROM, so its program counter doesn't keep the 8-bit SDRAM busy)
-build/snes_load/GSU.vhd: $(SNES_UP)/chip/GSU/GSU.vhd quartus/snes_load/gsu_rom_hold.patch
+# isn't reading ROM, so its program counter doesn't keep the 8-bit SDRAM busy). GSU_PKG.vhd and
+# GSUMap.vhd are copied next to it: with GSUMap.vhd in the vendor directory, Quartus also read
+# the unpatched GSU.vhd from there.
+build/snes_load/GSU.vhd: $(SNES_UP)/chip/GSU/GSU.vhd quartus/snes_load/gsu_rom_hold.patch \
+    $(SNES_UP)/chip/GSU/GSU_PKG.vhd $(SNES_UP)/chip/GSU/GSUMap.vhd
 	mkdir -p build/snes_load
+	cp $(SNES_UP)/chip/GSU/GSU_PKG.vhd $(SNES_UP)/chip/GSU/GSUMap.vhd build/snes_load/
 	cp $< $@
 	patch -s $@ < quartus/snes_load/gsu_rom_hold.patch
 build/snes_load/diag.hex: quartus/snes_load/diag.txt tools/mkscreen.py

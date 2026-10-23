@@ -198,10 +198,13 @@ module sdram_rom8 #(
     wire        quiet  = !rom_en || rfsh_ok;
     wire        slot   = k_ok && quiet;
 
+    reg         rq_need = 1'b0;         // a read is wanted (latest k = 2 sample)
     reg  [10:0] rcnt = 11'd0;
     reg         rf_soft = 1'b0, rf_hard = 1'b0, rf_limit = 1'b0;   // rcnt >= RF_*, registered
     wire        rf_cond  = (rf_soft && slot) || (rf_hard && k_ok);
-    wire        rf_now   = rf_limit || (!rd_req && rf_cond);
+    // (v7) nor while an ARAM request waits for its start: a REF then held it off for T_RC, and
+    // with a GSU cart's ROM traffic that made a few ARAM reads per minute miss the DSP's deadline
+    wire        rf_now   = rf_limit || (!rd_req && !rq_need && rf_cond);
 
     // ------------------------------------------------------------------ sequencer
     localparam [2:0] S_POWER = 0, S_INIT = 1, S_IDLE = 2, S_READ = 3, S_WRITE = 4, S_WAIT = 5;
@@ -235,7 +238,6 @@ module sdram_rom8 #(
     reg  [15:0] wq_a [0:3];             // write queue, head = 0
     reg  [7:0]  wq_d [0:3];
     reg  [2:0]  wq_n = 3'd0;
-    reg         rq_need = 1'b0;         // a read is wanted (latest k = 2 sample)
     reg  [15:0] rq_addr = 16'd0;
     reg  [2:0]  rq_age = 3'd0;          // k = 0 edges the request has waited
     reg  [15:0] tag = 16'd0;            // ar_q holds the byte at tag
