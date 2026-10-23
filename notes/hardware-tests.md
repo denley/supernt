@@ -41,10 +41,12 @@ The SNES core with the Super FX next to the SA-1 (`notes/snes-load.md`, "v7 in s
 simulation Yoshi's Island reaches its Super FX-drawn Nintendo logo and Star Fox its starfield
 intro, both as in Mesen2; the SA-1 test, menu, second load and save RAM still pass.
 
-**The card is prepared** (24 Oct ~05:00): `SYSTEM/CORES/spc.cor` = `TESTCORES/16-q-snes_load-v7.cor`
-(SA-1 + Super FX; clk_mem setup 0.27 ns short at the slow 85 °C corner, 0.03 ns at 0 °C, hold
-met), `17-q-snes_gsu.cor` = the same without the SA-1 (timing fully met), `14-q-snes_load.cor`
-= v6 unchanged; `SPC/6 Yoshi's Island.spc` and `SPC/7 Star Fox.spc` added.
+**The card is prepared** (24 Oct ~06:30; the ~05:00 cores had the loader bug in
+`notes/snes-load.md`, "v7 build", and were replaced): `SYSTEM/CORES/spc.cor` =
+`TESTCORES/16-q-snes_load-v7.cor` (SA-1 + Super FX; clk_mem setup 0.13 ns short at the slow
+85 °C corner, met at 0 °C, hold met), `17-q-snes_gsu.cor` = the same without the SA-1 (setup
+met, one harmless 2 ps hold miss), `14-q-snes_load.cor` = v6 unchanged; `SPC/6 Yoshi's
+Island.spc` and `SPC/7 Star Fox.spc` added.
 
 1. Start `tools/capview.py` (check `pgrep -a ffmpeg` afterwards; restart it if the live view
    says no signal while the TV has a picture).
