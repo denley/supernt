@@ -8,8 +8,9 @@
 // edge READ+CL" is driven from tAC after edge READ+CL-1 until tOH after edge READ+CL (between
 // those, the bus holds the previous word up to tOH and is undefined (X) from tOH to tAC).
 // (quartus/hwtest/sim/sdram_model.v puts it one edge later: valid from READ+CL+tAC.)
-// Full-page bursts: a READ/WRITE burst runs on through the page on NOP/deselect cycles until
-// BURST TERMINATE, PRECHARGE or another READ/WRITE. Truncation by BST/PRE at edge p: the last
+// Full-page bursts: a READ/WRITE burst runs on through the page on NOP/deselect/ACT cycles until
+// BURST TERMINATE, a PRECHARGE of its bank or another READ/WRITE (any bank). A WRITE while read
+// data is still due is an error (that data would be lost). Truncation by BST/PRE at edge p: the last
 // read word is the one available at p+CL-1; for writes, the data at the BST/PRE edge is not
 // written. Write bursts store whatever is on DQ (X/Z included) so a missing BST shows up as
 // corrupted neighbours.
@@ -81,6 +82,7 @@ module is42s_model #(
     reg [15:0] qd [0:7];
     reg        qv [0:7];
     integer    i, k;
+    reg        term;
     initial begin
         for (i = 0; i < 8; i = i + 1) qv[i] = 0;
         for (i = 0; i < 4; i = i + 1) begin
@@ -108,8 +110,12 @@ module is42s_model #(
         for (i = 0; i < 7; i = i + 1) begin qd[i] = qd[i + 1]; qv[i] = qv[i + 1]; end
         qv[7] = 0;
         // write data at this edge (burst continuing, or a new WRITE below)
-        if (wr_on && !cs_n && {ras_n, cas_n, we_n} != 3'b111)
-            wr_on = 0;                           // any command ends the write burst
+        // a burst ends with READ/WRITE (any bank), BURST TERMINATE or a PRECHARGE of its bank;
+        // ACT, REF and NOP leave it running
+        term = !cs_n && ({ras_n, cas_n, we_n} == 3'b101 || {ras_n, cas_n, we_n} == 3'b100 ||
+                         {ras_n, cas_n, we_n} == 3'b110 ||
+                         ({ras_n, cas_n, we_n} == 3'b010 && (a[10] || ba == bb)));
+        if (wr_on && term) wr_on = 0;
         if (wr_on) begin
             if ($realtime - t_dq < T_IS) err("write data setup violation");
             mem[mi(bb, row[bb], bc)] = dq;
@@ -117,7 +123,7 @@ module is42s_model #(
             t_wdata[bb] = $realtime; wdata_edge[bb] = edge_n; t_wedge = $realtime;
             bc = (bc + 1) & CMASK;
         end
-        if (rd_on && !cs_n && {ras_n, cas_n, we_n} != 3'b111) rd_on = 0;   // truncated (BST/PRE/...)
+        if (rd_on && term) rd_on = 0;            // truncated
         if (rd_on) begin
             qd[cl] = mem[rd_index]; qv[cl] = 1; bc = (bc + 1) & CMASK;
         end
@@ -144,6 +150,8 @@ module is42s_model #(
                     qd[cl] = mem[mi(ba, row[ba], bc)]; qv[cl] = 1; bc = (bc + 1) & CMASK;
                     n_rd = n_rd + 1;
                 end else begin
+                    for (k = 1; k < 8; k = k + 1)
+                        if (qv[k]) begin err("WRITE while read data is still due (lost)"); qv[k] = 0; end
                     rd_on = 0; wr_on = 1;
                     if ($realtime - t_dq < T_IS) err("write data setup violation");
                     mem[mi(ba, row[ba], bc)] = dq;

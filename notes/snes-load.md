@@ -7,10 +7,36 @@ player's file browser on it, and a "song" made by `tools/rom2spc.py` carries the
 transfer the core checks the ROM in SDRAM against the file's CRC-32, shows the result for 4 s
 and starts the game. Everything the PIC does stays visible on a diagnostics page.
 
-**Status:** simulated end to end (Verilator: PIC32 stand-in, pad, SDRAM cycle model; the SA-1
-test ROM passes from SDRAM through the 8-bit path; Gradius III and Kirby Super Star detected,
-loaded, verified and booted); builds with timing met at all corners; pin check passes. **Not yet run on
-the console.** Test procedure at the end.
+**Status:** v1 (commit 6ea85d1) **works on the console** (23 Oct: SA-1 test, Gradius III,
+Kirby Super Star; notes/hardware-tests.md). v2 (this version, "v2" below) closes v1's gaps:
+the way back to the player's menu, 64 KB of save RAM (Super Mario RPG, Kirby's Dream Land 3),
+keeping saves across reloads, a full PIC link log. Simulated and built; **not yet run on the
+console**: the one-run test is at the end ("Console test (v2)").
+
+## v2 in short (23 Oct 2026)
+
+- **Back to the menu.** v1's console run showed that after a file the PIC writes a few
+  registers (`0x1000_0021` = F8 last) and then does nothing on the link (notes/pic-link.md,
+  "After a file"). The stock spc.cor has no output that depends on the pad and no combination
+  detector (decoded), so the PIC must watch the controller lines itself; the JB menu
+  combination is **DOWN + SELECT**. v2 therefore polls the pad with the **stock core's
+  waveform** (16.17 ms, latch 8.3 us, 33 clocks 0.6/18.7 us; v1: 1 kHz, 12 us, 32 x 6/6 us) and
+  answers the pad registers **all the time** as spc.cor does (v1: only while its browser view was
+  up), and **follows the PIC**: as soon as the PIC writes its screen or runs its UI loop again
+  after a game started, the core shows the PIC's screen, gives it the pad (the game gets
+  nothing) and accepts a new file; 600 ms after the PIC goes quiet (e.g. SELECT = "back to
+  game") the game is shown again. L+R+SELECT+START (1 s) toggles the same view by hand.
+  Options (status page, L+R+UP/DOWN/LEFT): v1 poll timing, v1 pad gating, follow off.
+- **Save RAM 64 KB.** The SPC700's 64 KB ARAM moved from block RAM to SDRAM bank 3 (a new port
+  of `sdram_rom8.sv` in command slots the ROM reads never use), which freed 64 M10Ks: BW-RAM/
+  SRAM is now 64 KB of block RAM (v1: 8 KB). Super Mario RPG and Kirby's Dream Land 3 declare
+  32 KB (header RAM size 05; Kirby Super Star 03 = 8 KB). ROMs up to 6 MB (banks 0-2).
+- **Saves within a power-on.** BW-RAM/SRAM is kept when the game booted is the same as the last
+  one (ROM CRC-32), cleared when it is another. Saving to the SD card isn't possible from the
+  SPC player (below, "Saves").
+- **Log.** Every link transaction but the file bytes (reads, UI loop and pad reads included) goes
+  into a 512-entry log with times (first and last), shown on the status page (2 newest) and in a
+  log view that pages through all entries by itself.
 
 ## What it does, start to finish
 
@@ -32,14 +58,20 @@ the console.** Test procedure at the end.
    CRC-32 compared with the info block's ("= INFO CRC: OK" in green, or "MISMATCH").
 5. 4 s later (time to read or photograph the page) the SNES leaves reset and the picture
    switches to the game. On a mismatch it doesn't start (L+R+A held 0.5 s starts it anyway).
-6. The PIC keeps running its UI loop; the core keeps answering (pad reads return "nothing
-   pressed" while the game has the pad) and logs everything else the PIC does.
+6. The PIC writes a few registers (`0x1000_0021` = F8 last), runs its UI loop once more and goes
+   quiet on the link (v1 console run). The core keeps answering (pad registers = the pad, as
+   spc.cor) and logs everything. If the PIC wakes up (its menu combination, DOWN + SELECT, by
+   the v2 decode) and writes its screen or runs its UI loop, the core shows its screen, gives it
+   the pad and accepts the next file (step 3 again).
 
-Keys (hold 0.5 s): **L+R+SELECT** diagnostics page on/off (any time); **L+R+START** file
-browser on/off while a game runs: the PIC gets the pad, the game doesn't, and RUN on a file
-loads it (the game stops); **L+R+A** boot after a failed verify. While a game runs, a file the
-PIC sends without the browser being open is ignored (counted on the page as "lost ... ign"),
-so an auto-advancing player can't reset the game.
+Keys (v2; exact combinations, nothing else held): **L+R+SELECT** (0.5 s) cycles the
+diagnostics: status page -> log view -> off; **L+R+SELECT+START** (1 s) the menu view (the
+PIC's screen; the PIC gets the pad, the game doesn't; RUN on a file loads it) on/off; **L+R+A**
+(0.5 s) boot after a failed verify; on the status page **L+R+UP / DOWN / LEFT** (0.5 s) toggle
+the options (pad poll STOCK/FAST, PIC pad ALWAYS/GATED, follow ON/OFF), shown on its OPTIONS
+line. (v1: L+R+SELECT page, L+R+START browser.) While a game runs, a file the PIC sends while
+the menu view is down is ignored (counted as "lost ... ign"). The JB menu combination DOWN +
+SELECT is the PIC's (if it watches the pad lines); the core only follows what the PIC does.
 
 ## Files
 
@@ -65,9 +97,12 @@ ran Gradius III as a 16-bit reference), the sim models
 `snes_video.sv` exports its counters (`cx`/`cy`) for the overlay.
 
 Make targets: `out/q-snes_load.cor`, `load-spcs` (the test files), `sim-sdram-rom8`,
-`sim-snes-load`, `sim-snes-load-gradius`, `sim-snes-load-kirby`.
+`sim-snes-load`, `sim-snes-load-gradius`, `sim-snes-load-kirby`, `sim-snes-load-kdl3`,
+`sim-snes-load-smrpg`. v2: `snes_sdram_core.sv` has `ARAM_EXT` (ARAM through `ext_aram_*`
+ports) and a BW-RAM clear port (snes_sdram ties them off); the SDRAM models end bursts only on
+READ/WRITE/BST/PRE of the bank and flag a WRITE while read data is due.
 
-## The file (`tools/rom2spc.py ROM OUT.spc [--title T]`)
+## The file (`tools/rom2spc.py ROM OUT.spc [--title T] [--length S]`)
 
 | file offset | link address | contents |
 |---|---|---|
@@ -83,6 +118,9 @@ ROM byte k arrives at link address 0x2_0100 + k and goes to SDRAM byte k. Test f
 | `build/snes_load/sa1test.spc` | 0x18200 | AD3E85A3 | 32 KB | 8C5F7E54 | "SUPERNT SA1 TEST" map 23 type 35 → LoROM + SA-1, ROM_TYPE 60, masks 7FFF / 7FF |
 | `build/snes_load/gradius3.spc` | 0x90200 | A70084ED | 512 KB | CD973979 | "gradius 3" map 20 type 00 → LoROM, ROM_TYPE 00, mask 7FFFF, no RAM |
 | `build/snes_load/kirbyss.spc` | 0x410200 | 40E67CE5 | 4 MB | 89D0F7DC | "KIRBY SUPER DELUXE" map 23 type 35 → LoROM + SA-1, ROM_TYPE 60, mask 3FFFFF, RAM 1FFF (8 KB) |
+| `build/snes_load/kdl3.spc` (v2) | 0x410200 | A776507C | 4 MB | EC8A48F6 | "KIRBY'S DREAM LAND 3" map 23 type 35 RAM 05 → LoROM + SA-1, mask 3FFFFF, RAM 7FFF (32 KB) |
+| `build/snes_load/smrpg.spc` (v2) | 0x410200 | 8C4C439B | 4 MB | 1B8A0625 | "SUPER MARIO RPG" map 23 type 35 RAM 05 → LoROM + SA-1, mask 3FFFFF, RAM 7FFF (32 KB) |
+| `build/snes_load/sa1test20.spc` (v2) | 0x18200 | AEB15DDA | 32 KB | 8C5F7E54 | the SA-1 test with a 20 s ID666 song length (`--length 20`) |
 
 ## SDRAM: chip B alone, 8 bits, 5 x clk_sys (`sdram_rom8.sv`)
 
@@ -170,20 +208,71 @@ both others, HiROM if >= ExHiROM, ExHiROM if > 0. SA-1 = map 23 and type 32/34/3
 chip)" and started as plain Lo/HiROM. ROM mask = next power of two of the size - 1; RAM mask =
 (1 KB << header RAM size) - 1. The tool's guess is in the info block and shown next to it.
 
-BW-RAM/SRAM: **8 KB of block RAM** (`BSRAM_AW` 13; 8 of the 308 RAM blocks are left). Games with more
-(Super Mario RPG: 32 KB BW-RAM) will misbehave; Kirby Super Star (8 KB) fits. No saving.
+BW-RAM/SRAM: **64 KB of block RAM** (v2, `BSRAM_AW` 16; v1 8 KB). The mask is the header's
+(32 KB for Super Mario RPG and Kirby's Dream Land 3), so headers above 64 KB (RAM size 07, 128
+KB) would mirror. Kept across a reload of the same game (ROM CRC-32 equal to the last game
+booted: "KEPT" on the status page), cleared to zero in the SHOW state otherwise ("CLEARED").
+
+ARAM (v2): 64 KB in SDRAM bank 3 at byte 0x600000 (sdram_rom8.sv's ARAM port), cleared to zero
+through the write port in SHOW (64 K writes, ~4.3 ms) before every boot. ROM bytes at 6 MB and
+above count as "lost ... 8MB" (n_big) and aren't verified.
+
+## Saves (v2): not to the SD card
+
+Saving BW-RAM/SRAM to the card would need the PIC to read it back and write a file. From the
+SPC player there is no such path [likely]: in every session logged so far (hwtest v1-v6, snes_load
+v1) the player read only the status (`0x2004`) and the pad registers; the stock core's read map
+(notes/pic-link.md, "Read data") has no bulk memory window the player uses; and the JB
+firmware writes saves (`/SAVES/SNES/`, with its "Save?" prompt) only for its own ROM loader /
+cartridge core, not for the SPC player, which has nothing to save. So v2 keeps saves only while
+the console is on: the RAM is left as it is when the same game (ROM CRC-32) is booted again,
+and cleared when another game is booted (one game's saves at a time; a power cycle loses them).
+
+## SDRAM ARAM port (v2, `sdram_rom8.sv`)
+
+The S-DSP/SPC700 make one RAM access per DSP substep (CEGen at 4.096 MHz: every 5 or 6 clk_sys);
+the address changes at a clk_sys edge, reads are taken at the next DSP CE edge (>= 25 clk_mem
+later), writes are asserted for every clk_sys edge of the substep. The controller samples the
+port at k = 4, keeps a 4-entry write queue (repeats dropped, a write to the address in `ar_q`
+updates it, a read of a queued address is answered from the queue) and runs one bank-3
+operation at a time, started only at k = 0 when the ROM sequencer is idle (case I) or three
+cycles into a read (case II), in edges the ROM schedule never uses (slots after the start; a ROM
+read with ACT at slot a uses a, a+2, a+4, a+5):
+
+| operation | ACT | READ/WRITE | BST | PRECHARGE | data |
+|---|---|---|---|---|---|
+| read | 0 | READ 3 | – | 5 | captured in `cap` at 7, `ar_q` at 8 (k = 3) |
+| write, case I | 0 | WRITE 3 | 4 (unless the ROM's READ is there) | 5 | bus driven at 3 |
+| write, case II | 0 | WRITE 8 | 9 (unless the ROM's READ is there) | 10 | bus driven at 8 (the ROM's last word is due at 4) |
+
+A ROM ACT is held off when its own edges (now, +2, +4, +5) would hit one of these (only reads
+that were already late can); REF waits for the bank. `cap` is the shared I/O-cell capture
+register: the ROM byte in it is copied to `cap_hold` just before an ARAM byte replaces it and
+rom_q's high lane takes it from there until the next ROM capture (one more LUT on that path).
+Latency: address at E, request seen at E + 4, start at E + 5 (or E + 10 if blocked), byte in
+ar_q at E + 13 (E + 18). `sim-sdram-rom8` checks it against the timed model with an S-DSP
+stand-in (55 % reads, half of recently used addresses, 35 % writes, every read checked at the
+substep's end against a shadow copy) next to the SA-1 traffic, and the models now treat a WRITE
+while read data is still due as an error and only end bursts on READ/WRITE/BST/PRE of the bank.
 
 ## Link (`link_ui.sv`)
 
 Port as `link_logger.sv`/`link_loader.sv` (2-FF synchronisers on clk_mem, 107.2 MHz; reads
-only after the port is armed). Status `0x2xx4` = 02; `0x2000`/`0x2001` = pad bits (or 0 while
-the game has the pad), `0x2008` = 01 (03 if no standard pad answers); everything else 00.
-Screen writes (`0x1018_0000`-`0FFF`) go to a 4 KB RAM the overlay reads. The **log**: a run =
-consecutive writes or reads at consecutive addresses; runs go into a 16-entry ring (address,
-count, first byte, kind 0 write / 1 read, repeats, ms); a run equal to the newest entry only
-counts a repeat. The UI loop (`0x1000_D120` writes, pad reads) and the file are only counted.
-The page shows the newest 6 entries: after the transfer they are whatever the PIC does then
-(not known yet: hwtest v6b's log ended without anything notable).
+only after the port is armed). Status `0x2xx4` = 02; `0x2000`/`0x2001` = pad bits (v2: always,
+as spc.cor; option GATED: 0 unless the menu view is up, as v1), `0x2008` = 01 (03 if no
+standard pad answers); everything else 00. Screen writes (`0x1018_0000`-`0FFF`) go to a 4 KB
+RAM the overlay reads. Counters: status, UI-loop and pad reads, all reads and writes, times of
+the newest transaction, UI-loop write and screen write, and the newest byte written to
+`0x1000_0021` (with its time and count).
+
+The **log** (v2): a run = consecutive writes or reads at consecutive addresses (ended by any
+other transaction or 2 ms without one); everything but the file bytes is logged. Entries (512,
+M10K): {index, sequence number, kind 0 write / 1 read, address, bytes, first byte, repeats,
+T first, T last}. Before the first file byte new entries go to a ring at 384-511; from the first
+file byte on to 0-383 in order until those are full, then to the ring again. A run equal (kind,
+address, bytes, first byte) to one of the 8 newest entries only bumps that entry's repeats and
+T last, so the UI loop (D120 write, 2 x 2 pad reads) is a handful of entries, and a pad read with
+a button held is a new one.
 
 ## Video
 
@@ -197,14 +286,16 @@ counters and the top delays the SNES picture 3 clocks to line up:
   Cursor bar (attribute bits 6-5) blue; characters 80-FF are the player's icons, drawn as
   yellow letters by guess from the captured screen: 81 B, 83 Y, 89 #, 8A +, 9E-A3 "START ",
   A4-A9 "SELECT", B2 <, others `*`.
-- **Diagnostics**: 80 × 22 cells of 16 × 32 (as hwtest's pages), `diag.txt`:
+- **Diagnostics** (v2): 80 × 22 cells of 16 × 32 (as hwtest's pages), `diag.txt`; the status
+  page:
 
 ```
- SUPER NT SNES LOADER  T <ms>   state <n> <name>
- LINK  2004 answer 02  status reads <n>  UI loops <n>
-       pad reads <n>  writes <n>  addr <link address>  screen <bytes>
+ SUPER NT SNES LOADER v2  T <ms>   state <n> <name>
+ LINK  answer 02  status rd <n>  UI loops <n>  pad rd <n>
+       reads <n>  writes <n>  addr <link address>  screen <bytes>
+       last T <newest transaction>  UI <newest UI write>  scr <newest screen write>  0021=<byte> T <ms> n<count>
  FILE  bytes <n>  CRC-32 <file>  end <highest offset+1>  T <start>-<end>
-       ROM bytes <n>  CRC-32 <ROM>  order <n>  lost <FIFO> <bytes>8MB:16 ignored:16>
+       ROM bytes <n>  CRC-32 <ROM>  order <n>  lost <FIFO> <bytes>6MB:16 ignored:16>
  INFO  SNTROM01 ok  ROM size <n>  CRC-32 <crc>  tool type <guess>
        name <32 chars>
  HEADER <title>  map <> type <> ROM <> RAM <>
@@ -212,13 +303,19 @@ counters and the top delays the SNES picture 3 clocks to line up:
        <LoROM/HiROM/ExHiROM [+ SA-1] [(no chip)]>  ROM_TYPE <>  ROM mask <>  RAM mask <>
  SDRAM read back: CRC-32 <crc>  = INFO CRC: OK | = TRANSFER CRC: OK | MISMATCH
        ROM reads <n>  REF forced <n> stalled <n>  late <n>  gap <max REF interval, cycles>
+       ARAM rd <n> wr <n> fwd <n> late <n> drop <n> clash <n>
  SNES  boot T <ms>  frames <n>  pad <raw 32 bits> std pad|no pad polls <n>
+       save RAM 64 KB: KEPT (same game as last boot) | CLEARED (another game)  game <CRC>
+ OPTIONS UP poll STOCK|FAST (v1)  DOWN pad ALWAYS|GATED (v1)  LEFT follow ON|OFF  view GAME|MENU(PIC)|MENU(keys)
  KEYS ...
- PIC LINK LOG newest first ...  runs <n>  last UI <ms>
-   #  K  ADDRESS   BYTES   D0  REPEATS  T ms        (6 rows)
+ PIC LINK LOG 2 newest below  entries <n>  after file <n in 0-383>
+   IDX  SEQ K ADDRESS  BYTES D0 REPEATS T FIRST T LAST
+   <2 rows>
 ```
 
-All numbers hex; T in ms since configuration. Values are sampled once per frame.
+  The **log view** (mode 3) shows the last three lines' layout: the two title rows, then 20
+  entries per page: pages of entries 0-383 (in order, only as many as are used), then 7 pages
+  of the ring (384-511); "pg NN/MM" at the top right; the page advances every 2.5 s by itself.
 
 ## Pins
 
@@ -229,6 +326,41 @@ DQM candidates / open-drain group, hwtest's 43 stock-constant pins, everything e
 `tools/checkpins.py` passes.
 
 ## Simulation
+
+**v2 (23 Oct).** `make sim-sdram-rom8`: the controller with the S-DSP stand-in on the ARAM port
+next to the SA-1 traffic: PASS at D_CLK 1, 3.5 and 6 ns (rise 4), fall 3.5 and rise 5 fail as
+they must; e.g. at 3.5 ns 1837 substep reads checked, 0 errors, 1134 writes, 0 dropped, 0
+clashes, ARAM backdoor = shadow, 0 model errors (with the stricter models), no bus contention,
+ROM phase A 0 errors / 0 late.
+
+`make sim-snes-load` (62 frames; the PIC stand-in now behaves as the console did after a file
+and then watches the controller lines for DOWN+SELECT, see `sim/tb_snes_load.cpp`): **PASS**.
+First load and boot as before (SA-1 tests all pass, from SDRAM, with ARAM in SDRAM); L+R+
+SELECT+START shows the menu view (frames 15-19) and hides it, the PIC stays silent; L+R+SELECT
+x 3: status page (`-24.png`: v2 page, OPTIONS line, save RAM CLEARED for the first game), log
+view (`-28.png`: the PIC's post-file writes ending with 0021 = F8 and one UI loop, times in
+ms), off; DOWN+SELECT: the PIC model wakes, redraws its browser, the core follows it to the
+menu view (from frame 34) and the game gets no buttons; DOWN, Y: the second file (the same ROM
+under another name) is sent, loaded, verified, the save RAM line says KEPT, the SA-1 tests pass
+again after the second boot (frame 48). ARAM port: 1.84 M reads, 706 writes, 0 late, 0 dropped,
+0 command clashes; SDRAM 0 late reads, 0 model errors. The pad poller ran with the stock
+timing throughout (the testbench's 4021 model and the PIC's line decoder both on its
+LATCH/CLOCK).
+
+`make sim-snes-load-kdl3` / `sim-snes-load-smrpg` (new; 45 ns link strobes, the v2 PIC model
+without presses, 300 frames, ~40 min each): both 4 MB files load, verify (CRCs EC8A48F6 /
+1B8A0625 = info), LoROM + SA-1, ROM_TYPE 60, ROM mask 3FFFFF, **RAM mask 7FFF** (32 KB, now in
+the 64 KB block RAM), boot at T 933 ms and run ~4 s: Kirby's Dream Land 3 reaches the Nintendo
+logo on white (`build/sim/snes_load_kdl3-299.png`), Super Mario RPG the Nintendo logo and then
+the Square logo with the copyright lines (`snes_load_smrpg-195.png`, `-299.png`); PASS (load,
+mapper, SDRAM 0 late / 0 model errors, ARAM 9.1 M reads, 0.53 M / 0.16 M writes, 0 late, 0
+dropped, 0 clashes). Not compared with a 16-bit reference run (sim-snes-sdram has no 32 KB
+BW-RAM build). These two ran before the last two timing-only changes (the log's compare and the
+ARAM forward counter registered one cycle later); `sim-snes-load` and `sim-sdram-rom8` were
+rerun after them. The write queue's read forwarding never triggered in any run (fwd 0: writes
+are always done before the next substep's read); it is untested beyond that.
+
+**v1:**
 
 **Controller** (`make sim-sdram-rom8`, iverilog, `sim/tb_sdram_rom8.sv` + the timed model of
 `quartus/snes_sdram/sim/sdram_model.v` with 512-column pages, clk = 5 × clk_sys): 2112 bytes
@@ -277,7 +409,18 @@ The startup frame of 734 lines (frame 1) is snes_video aligning to the SNES PPU,
 while the core is held in reset; it happens once, ~40 ms after configuration (before the PIC
 sets up the HDMI transmitter), and not again at the boot.
 
-## Build results (23 Oct 2026)
+## Build results
+
+**v2 (23 Oct 2026):** `make out/q-snes_load.cor` (Quartus 25.1 Lite, ~25 min): `.cor` 2,632,660
+bytes, sha1 017a65cb0041…. 14,666 / 18,480 ALMs (79 %), 14,493 registers, **299 / 308 RAM
+blocks** (ARAM -64, BW-RAM +56, log +7), 19 DSP blocks. **Timing met at all four corners**
+(worst setup +0.082 ns, hold +0.097 ns). Pin check: 86 user I/Os, all as assigned (the same pins
+as v1; no new pin is driven). Two rounds were needed: first ar_q -> S-DSP/SPC700 combinational
+outputs -> the ARAM port's sampling registers failed by 3.1 ns (one clk_mem cycle as analysed;
+fixed by sampling at k = 2 with ar_q changing only at k = 3, and a 4-cycle multicycle in the
+SDC), then the log's 8-entry compare and the ARAM forward counter by 0.5 ns (registered).
+
+**v1:**
 
 `make out/q-snes_load.cor` (Quartus 25.1 Lite, `quartus/snes_load/build.log`, ~20 min): `.cor`
 2,632,660 bytes, sha1 da2832ef….
@@ -297,7 +440,70 @@ sets up the HDMI transmitter), and not again at the boot.
   frequency and phase are merged, and the SDC's `*[2].*` clock name then matches nothing (all
   SDRAM I/O constraints silently dropped; warning 332174) — hence the 1-step SDRAM clock lead.
 
-## Console test (first run)
+## Console test (v2): one run
+
+Goal: find the way back to the player's menu without a power cycle, check 64 KB save RAM (Super
+Mario RPG, Kirby's Dream Land 3) and the kept saves, and record everything the PIC does. The
+capture dongle records all of it; read the pages from the recording afterwards.
+
+**Prepare (homebox):** `make out/q-snes_load.cor load-spcs`; mount the card; `tools/sdcore
+setup` (q-snes_load is **14**), `tools/sdcore use 14`, `tools/sdcore roms` ("0 SA1 TEST",
+"1 Gradius III", "2 Kirby Super Star", "3 Kirby's Dream Land 3", "4 Super Mario RPG",
+"5 SA1 TEST 20S"; 4.2 MB each for 2-4); unmount. Start `tools/capview.py` recording.
+
+Hold every combination until something happens or for the time given; "page" = L+R+SELECT
+(0.5 s), which cycles status page -> log view -> off.
+
+1. Power on, Tools -> "Play SPC Files". The browser with the six files below GO BACK.
+2. DOWN, Y on **0 SA1 TEST**: status page ("VERIFIED - STARTING", OPTIONS line `UP poll STOCK
+   DOWN pad ALWAYS LEFT follow ON`), 4 s later the SA-1 test (7 green bars). Press a few game
+   buttons (backdrop turns blue: the pad reaches the game with the stock poll timing).
+3. Wait 5 s. **page** (status page): note `last T`, `UI`, `scr`, `0021=F8 T ..` (expected:
+   nothing after the F8, as in v1). **page** again (log view): let it page through by itself
+   (2.5 s per page, "pg NN/MM" top right) until it wraps; **page** again (off).
+4. **The main test: DOWN + SELECT**, hold 2 s, then let go and wait 3 s. Expected if the decode
+   is right: the PIC's own screen appears (the browser or the JB menu; the OPTIONS line would
+   say `view MENU(PIC)`). Then:
+   - browser: DOWN to **1 Gradius III**, Y -> it loads and runs (the way back works);
+   - a menu: note its items (photo), pick the file browser / "back to game" (Y = confirm,
+     B = back, SELECT = back to game) and continue as above.
+   If nothing appears: hold DOWN + SELECT again for 5 s; then UP + SELECT 2 s and SELECT +
+   START 2 s (other combinations other Analogue consoles use).
+5. Only if step 4 showed nothing: **page** to the status page, **L+R+UP** (0.5 s: `poll FAST
+   (v1)`), **page** twice (off), DOWN + SELECT 2 s again; then the status page again, **L+R+UP**
+   back to STOCK.
+6. **L+R+SELECT+START** (1 s): our menu view (the PIC's last screen, the game gets no buttons,
+   the PIC gets them): press B, START, Y, DOWN (one each, 1 s apart) and watch whether the
+   screen changes; **L+R+SELECT+START** again to close it.
+7. **page** (status), **page** (log view): let it run through all pages once (this is the
+   record of steps 4-6); **page** (off).
+8. If the way back worked (step 4): from the browser load **3 Kirby's Dream Land 3** (~3 s
+   transfer, status page: RAM mask 7FFF, "save RAM ... CLEARED"); play to the file select, start
+   a game, enter the first level (the game saves). DOWN + SELECT, load **3 Kirby's Dream Land 3**
+   again: the page must say "KEPT", and the file select must show the saved file. Then
+   **4 Super Mario RPG**: title, new game, play a minute (Mario's house). Then **5 SA1 TEST 20S**:
+   don't touch anything for 40 s (the song is 20 s long: does the player stop it, go back to its
+   browser (our view follows it), or send the next file ("lost ... ign" counts up)?), then
+   **page** twice for the log view.
+9. Press the console's **RESET** button once (short) and note what happens (the PIC handles
+   that button; if it returns to the Analogue menu, Tools -> "Play SPC Files" starts our core
+   again: that is a way back too, without a power cycle).
+10. If the way back didn't work: power off and on, Tools -> "Play SPC Files", load **3 Kirby's
+    Dream Land 3** (play to the file select and into a level), power cycle, **4 Super Mario
+    RPG** (title, new game), power cycle, **5 SA1 TEST 20S** (wait 40 s, then the log view).
+11. Power off; `tools/sdcore use 00` restores the stock core.
+
+What to note (or read from the recording): for each step whether the PIC woke (its screen, the
+view on the OPTIONS line, the status page's `last T` / `UI` / `scr` times, new log entries);
+each game's status page (CRC OK, ROM_TYPE 60, RAM mask 7FFF, save RAM line) and whether it
+plays with sound; the ARAM line (`late`, `drop`, `clash` should stay 0); ROM `late` 0.
+
+Interpretation: a PIC screen after DOWN + SELECT confirms that the PIC watches the controller
+lines and the gap is closed. Nothing in steps 4-6 and no log entries means the PIC waits on
+something the core doesn't do (one of the stock outputs listed in notes/pic-link.md, "After a
+file"); step 8/10's 20 s file and step 9 then show whether the player ever comes back by itself.
+
+## Console test (first run, v1)
 
 Needs: the card on homebox (`notes/hardware-tests.md`), a pad in port 1, the projector or the
 HDMI capture dongle with `tools/capview.py` (live view http://homebox.jaguar-munsell.ts.net:8765/,

@@ -325,7 +325,7 @@ sim-sdram-rom8: $(SDROM8_SIM)
 	  iverilog -g2012 -s tb_sdram_rom8 -P tb_sdram_rom8.CAPTURE_HALF=$$h -P tb_sdram_rom8.EXPECT_FAIL=$$x \
 	    -P tb_sdram_rom8.D_CLK=$$d -P tb_sdram_rom8.D_OUT=$$o -o build/sim/sdram_rom8_$$n.vvp $(SDROM8_SIM); \
 	  vvp -n build/sim/sdram_rom8_$$n.vvp > build/sim/sdram_rom8_$$n.log; \
-	  grep -E '^ *[0-9]+ (init|wrote|64|phase)|^model' build/sim/sdram_rom8_$$n.log | sed 's/^ *[0-9]* /  /'; \
+	  grep -E '^ *[0-9]+ (init|wrote|64|phase)|^model|^ARAM' build/sim/sdram_rom8_$$n.log | sed 's/^ *[0-9]* /  /'; \
 	  grep -E '^(PASS|FAIL)' build/sim/sdram_rom8_$$n.log; grep -q '^PASS' build/sim/sdram_rom8_$$n.log; done
 
 LINK_LD_SIM := quartus/snes_sdram/sim/tb_link_loader.sv quartus/snes_sdram/sim/sdram_model.v \
@@ -393,7 +393,18 @@ build/snes_load/gradius3.spc: tools/rom2spc.py
 build/snes_load/kirbyss.spc: tools/rom2spc.py
 	mkdir -p build/snes_load
 	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Kirby Super Star (U) [!].smc" $@ --title "KIRBY SUPER STAR"
-load-spcs: build/snes_load/sa1test.spc build/snes_load/gradius3.spc build/snes_load/kirbyss.spc
+build/snes_load/kdl3.spc: tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Kirby's Dream Land 3 (U).smc" $@ --title "KIRBYS DREAM LAND 3"
+build/snes_load/smrpg.spc: tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py "$(SNES_ROMS)/Super Mario RPG - Legend of the Seven Stars (U) [!].smc" $@ --title "SUPER MARIO RPG"
+# the SA-1 test with a 20 s ID666 song length: what does the player do when a "song" ends?
+build/snes_load/sa1test20.spc: build/snes/sa1test.sfc tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I tools/rom2spc.py $< $@ --title "SA1 TEST 20S" --length 20
+load-spcs: build/snes_load/sa1test.spc build/snes_load/gradius3.spc build/snes_load/kirbyss.spc \
+  build/snes_load/kdl3.spc build/snes_load/smrpg.spc build/snes_load/sa1test20.spc
 .PHONY: load-spcs
 
 # End-to-end simulation of quartus/snes_load (notes/snes-load.md, "Simulation"): Verilator, the
@@ -404,7 +415,7 @@ load-spcs: build/snes_load/sa1test.spc build/snes_load/gradius3.spc build/snes_l
 # sim-snes-load-gradius: the Gradius III file (LoROM header detection, mapper, verify; the game
 # runs a few frames, no pass criterion on its picture).
 SNES_LOAD_SIM ?= $(HOME)/scratch/snes-load/sim
-SNES_LOAD_FRAMES ?= 28
+SNES_LOAD_FRAMES ?= 62
 SNES_LOAD_SV := quartus/snes_load/sim/tb.sv quartus/snes_load/snes_load_top.sv \
   quartus/snes_sdram/snes_sdram_core.sv quartus/snes/snes_video.sv quartus/common/i2s_out.sv \
   quartus/common/sdram_rom8.sv quartus/common/link_ui.sv quartus/common/rom_loader.sv \
@@ -446,14 +457,25 @@ sim-snes-load: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/sa1test.spc
 sim-snes-load-kirby: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/kirbyss.spc
 	mkdir -p build/sim
 	rm -f build/sim/snes_load_kss-*.p?m
-	TB_FAST=1 TB_GAME=1 TB_TYPE=60 TB_MASK=3FFFFF $(SNES_LOAD_SIM)/obj/Vtb 120 build/sim/snes_load_kss- \
+	TB_FAST=1 TB_GAME=1 TB_QUIET=1 TB_TYPE=60 TB_MASK=3FFFFF $(SNES_LOAD_SIM)/obj/Vtb 120 build/sim/snes_load_kss- \
 	  build/snes_load/kirbyss.spc > build/sim/snes_load_kss.log; s=$$?; tail -4 build/sim/snes_load_kss.log; \
 	  for f in build/sim/snes_load_kss-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
+
+# sim-snes-load-kdl3 / -smrpg: Kirby's Dream Land 3 and Super Mario RPG (4 MB SA-1, 32 KB BW-RAM
+# by the header): fast transfer (45 ns strobes), then ~4 s of the game (300 frames, ~30 min each).
+SNES_GAME_FRAMES ?= 300
+sim-snes-load-%: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/%.spc
+	mkdir -p build/sim
+	rm -f build/sim/snes_load_$*-*.p?m
+	TB_FAST=1 TB_PULSE=45 TB_GAME=1 TB_QUIET=1 TB_TYPE=60 TB_MASK=3FFFFF $(SNES_LOAD_SIM)/obj/Vtb \
+	  $(SNES_GAME_FRAMES) build/sim/snes_load_$*- build/snes_load/$*.spc > build/sim/snes_load_$*.log; s=$$?; \
+	  tail -6 build/sim/snes_load_$*.log; \
+	  for f in build/sim/snes_load_$*-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
 
 sim-snes-load-gradius: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/gradius3.spc
 	mkdir -p build/sim
 	rm -f build/sim/snes_load_g3-*.p?m
-	TB_FAST=1 TB_GAME=1 TB_TYPE=00 TB_MASK=07FFFF $(SNES_LOAD_SIM)/obj/Vtb 70 build/sim/snes_load_g3- \
+	TB_FAST=1 TB_GAME=1 TB_QUIET=1 TB_TYPE=00 TB_MASK=07FFFF $(SNES_LOAD_SIM)/obj/Vtb 70 build/sim/snes_load_g3- \
 	  build/snes_load/gradius3.spc > build/sim/snes_load_g3.log; s=$$?; cat build/sim/snes_load_g3.log; \
 	  for f in build/sim/snes_load_g3-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
 
@@ -464,4 +486,5 @@ clean:
 
 .PHONY: all clean FORCE sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader \
   sim-sdram-rom8 sim-snes-load sim-snes-load-gradius sim-snes-load-kirby
+# (sim-snes-load-kdl3 / -smrpg come from the pattern rule; phony targets skip implicit rules)
 .SECONDARY:

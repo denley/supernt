@@ -17,6 +17,11 @@
 //   3. phase B: 600 cycles with a new address in every one (no hidden refresh slot): refresh
 //      within 15.6 us, late reads only counted;
 //   4. phase A again (2000 cycles).
+// All the time the ROM port runs, an S-DSP stand-in uses the ARAM port (v2: bank 3 at
+// 0x600000): one access per DSP substep (5 or 6 clk_sys, CEGen's 4.096 MHz pattern), 55% reads
+// (half of them of recently written or read addresses), 35% writes (held for the whole substep,
+// as the DSP/SPC700 do), 10% idle; every read is checked at the substep's end against a shadow
+// copy (ar_q must hold the byte by then).
 // PASS/FAIL; EXPECT_FAIL = 1 inverts the verdict (a wrong CAPTURE_HALF must be caught).
 `timescale 1ns/1ps
 module tb_sdram_rom8;
@@ -51,6 +56,13 @@ module tb_sdram_rom8;
     wire [15:0] n_rf_forced, n_rf_stall, n_late;
     wire [10:0] rf_max;
     wire [31:0] n_reads;
+    // ARAM port
+    reg         ar_rd = 0, ar_wr = 0;
+    reg  [15:0] ar_addr = 0;
+    reg  [7:0]  ar_d = 0;
+    wire [7:0]  ar_q;
+    wire [31:0] n_ar_rd, n_ar_wr;
+    wire [15:0] n_ar_fwd, n_ar_late, n_ar_drop, n_clash;
     sdram_rom8 #(.CAPTURE_HALF(CAPTURE_HALF), .INIT_CYCLES(250)) dut (
         .clk(clk), .clk_sd(clk), .clk_cap(clk), .reset(1'b0), .ready(ready), .sys_tog(sys_tog),
         .rom_en(rom_en), .rom_addr(rom_addr), .rom_word(rom_word), .rom_q(rom_q), .rfsh_ok(~clk_ce),
@@ -59,7 +71,10 @@ module tb_sdram_rom8;
         .sd_clk(sd_clk), .sd_cs_n(cs_n), .sd_ras_n(ras_n), .sd_cas_n(cas_n), .sd_we_n(we_n),
         .sd_a(a), .sd_ba(ba), .sd_dq_in(dq_in_p), .sd_dq_out(dq_out), .sd_dq_oe(dq_oe),
         .n_rf_forced(n_rf_forced), .n_rf_stall(n_rf_stall), .n_late(n_late), .rf_max(rf_max),
-        .n_reads(n_reads));
+        .n_reads(n_reads),
+        .ar_en(rom_en), .ar_addr(ar_addr), .ar_rd(ar_rd), .ar_wr(ar_wr), .ar_d(ar_d), .ar_q(ar_q),
+        .n_ar_rd(n_ar_rd), .n_ar_wr(n_ar_wr), .n_ar_fwd(n_ar_fwd), .n_ar_late(n_ar_late),
+        .n_ar_drop(n_ar_drop), .n_clash(n_clash));
 
     // board
     reg        sclk_p = 1'b1;
@@ -77,7 +92,8 @@ module tb_sdram_rom8;
     integer contention = 0;
     always @(oe_p, mem.drive) if (oe_p && mem.drive) begin
         contention = contention + 1;
-        $display("%t bus contention", $realtime);
+        if (contention <= 10) $display("%t bus contention (A op %0d slot %0d on %0d, ROM st %0d cnt %0d)", $realtime,
+                                       dut.a_op, dut.a_slot, dut.a_on, dut.st, dut.cnt);
     end
 
     // test data: byte at SDRAM byte address b (the model keeps 16-bit words: chip B's byte is
@@ -160,6 +176,42 @@ module tb_sdram_rom8;
         end
     end
 
+    // ---------------------------------------------------------------- S-DSP stand-in
+    reg  [7:0]  shadow [0:65535];
+    reg  [15:0] recent [0:7];
+    integer     acc = 0, ss = 0, ar_reads = 0, ar_errs = 0, ar_writes = 0, ar_run = 0;
+    reg         rd_pend = 0;
+    reg  [15:0] rd_a;
+    integer     p2;
+    always @(posedge clk_sys) if (ar_run) begin
+        acc = acc + 4096000;
+        if (acc >= 21441960) begin                 // DSP CE: substep ends
+            acc = acc - 21441960;
+            if (rd_pend) begin
+                ar_reads = ar_reads + 1;
+                if (ar_q !== shadow[rd_a]) begin
+                    ar_errs = ar_errs + 1;
+                    if (ar_errs <= 8) $display("%t ARAM read %h got %h expected %h", $realtime, rd_a, ar_q, shadow[rd_a]);
+                end
+            end
+            if (ar_wr) begin shadow[ar_addr] = ar_d; ar_writes = ar_writes + 1; end
+            rd_pend = 0;
+            p2 = rnd(0) % 100;
+            ar_rd <= 1'b0; ar_wr <= 1'b0;
+            if (p2 < 55) begin
+                rd_a = p2 < 28 ? recent[rnd(0) % 8] : rnd(0);
+                ar_addr <= rd_a; ar_rd <= 1'b1; rd_pend = 1;
+                recent[ss % 8] = rd_a;
+            end else if (p2 < 90) begin
+                rd_a = p2 < 70 ? recent[rnd(0) % 8] : rnd(0);
+                ar_addr <= rd_a; ar_wr <= 1'b1; ar_d <= rnd(0);
+                recent[ss % 8] = rd_a;
+            end else
+                ar_addr <= rnd(0);
+            ss = ss + 1;
+        end
+    end
+
     integer i, k, berr = 0, aerr = 0, ok = 1;
     reg [22:0] b;
     initial begin
@@ -170,9 +222,10 @@ module tb_sdram_rom8;
         wl[nw] = 23'h000200; wl[nw + 1] = 23'h000201; nw = nw + 2;    // first of row 1
         wl[nw] = 23'h1FFFFE; wl[nw + 1] = 23'h1FFFFF; nw = nw + 2;    // end of bank 0
         wl[nw] = 23'h200000; wl[nw + 1] = 23'h200001; nw = nw + 2;    // bank 1
-        wl[nw] = 23'h7FFFFE; wl[nw + 1] = 23'h7FFFFF; nw = nw + 2;    // last bytes of the 8 MB
+        wl[nw] = 23'h5FFFFE; wl[nw + 1] = 23'h5FFFFF; nw = nw + 2;    // last bytes below the ARAM bank
+        wl[nw] = 23'h400000; wl[nw + 1] = 23'h400001; nw = nw + 2;    // bank 2
         while (nw < NW) begin
-            b = rnd(0) & 23'h7FFFFE;
+            b = (rnd(0) % 23'h600000) & 23'h7FFFFE;
             wl[nw] = b; wl[nw + 1] = b + 23'd1; nw = nw + 2;
         end
 
@@ -206,8 +259,15 @@ module tb_sdram_rom8;
         end
         $display("%t 64 aux reads, %0d errors", $realtime, aerr);
 
+        // ARAM bank: known contents
+        for (i = 0; i < 65536; i = i + 1) begin
+            shadow[i] = dat(23'h600000 + i) ^ 8'h5A;
+            mem.mem[{1'b0, 23'h600000 + i}] = {shadow[i], 8'h00};
+        end
+        for (i = 0; i < 8; i = i + 1) recent[i] = i * 16'h1111;
         rom_en <= 1'b1;
         repeat (4) @(posedge clk_sys);              // (the core leaves reset well after this)
+        ar_run = 1;
         ph = 1; mode = 1; cycles = 0;
         wait (cycles == 6000);
         k = n_late;
@@ -224,12 +284,26 @@ module tb_sdram_rom8;
         $display("%t phase A again: %0d reads, %0d errors, %0d VBP-word errors", $realtime, reads[3], errs[3], vbp_errs[3]);
         $display("model: %0d errors, %0d ACT, %0d READ, %0d words written, %0d REF, longest REF gap %0.0f ns; bus contention %0d; controller rf_max %0d cycles, stall %0d",
                  mem.errors, mem.n_act, mem.n_rd, mem.n_wr, mem.n_ref, mem.max_ref_gap, contention, rf_max, n_rf_stall);
+        @(posedge clk_sys);
+        ar_run = 0;
+        if (ar_wr) shadow[ar_addr] = ar_d;
+        ar_wr <= 1'b0; ar_rd <= 1'b0;
+        repeat (20) @(posedge clk_sys);
+        $display("ARAM: %0d substep reads checked, %0d errors, %0d writes; controller: %0d SDRAM reads, %0d writes, %0d forwarded, %0d late, %0d dropped, %0d clashes",
+                 ar_reads, ar_errs, ar_writes, n_ar_rd, n_ar_wr, n_ar_fwd, n_ar_late, n_ar_drop, n_clash);
+        k = 0;
+        for (i = 0; i < 65536; i = i + 1)
+            if (mem.mem[{1'b0, 23'h600000 + i}][15:8] !== shadow[i]) begin
+                k = k + 1;
+                if (k <= 5) $display("ARAM backdoor %h = %h, expected %h", i, mem.mem[{1'b0, 23'h600000 + i}][15:8], shadow[i]);
+            end
         if (EXPECT_FAIL) begin
             ok = errs[1] + errs[3] > 0;
             $display("%s: CAPTURE_HALF %0d %s (phase A errors %0d)", ok ? "PASS" : "FAIL", CAPTURE_HALF,
                      ok ? "fails as expected" : "unexpectedly works", errs[1] + errs[3]);
         end else begin
             ok = errs[1] == 0 && errs[3] == 0 && vbp_errs[1] == 0 && vbp_errs[3] == 0 && berr == 0 &&
+                 ar_errs == 0 && n_ar_drop == 0 && n_clash == 0 && ar_reads > 1000 && k == 0 &&
                  aerr == 0 && mem.errors == 0 && contention == 0 && mem.max_ref_gap <= 15625.0 &&
                  n_rf_forced > 0 && reads[1] > 3000;
             $display("%s: CAPTURE_HALF %0d, D_CLK %0.1f D_OUT %0.1f D_IN %0.1f", ok ? "PASS" : "FAIL",

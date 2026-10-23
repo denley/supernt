@@ -15,11 +15,9 @@
 //     go to a 4 KB RAM whose second port (clk_vid) the overlay reads as 16-bit cells;
 //   - the file: data writes at 0x0000_FF00-0x0FFF_FFFF (the SPC player sends the file there,
 //     link address 0xFF00 + file offset) come out on f_go/f_addr/f_data for the ROM loader;
-//   - a log of the rest: consecutive transactions (writes or reads to consecutive addresses)
-//     form a run; runs go into a ring of 16 entries {address, count, first byte, kind,
-//     repeats, time}; a run identical to the newest entry (kind, address, count, first byte)
-//     only bumps its repeat count (the status poll). Not logged, only counted: the UI loop
-//     (0x1000_D120 writes, pad reads at 0x2000-0x200F) and the file.
+//   - a log of everything but the file bytes (v2: reads, the UI loop and pad reads included):
+//     consecutive transactions (writes or reads to consecutive addresses) form a run; runs go
+//     into a 512-entry M10K log with times (see "Log" below); the file is only counted.
 // Port timing: 2-FF synchronisers on clk (>= 40 MHz; 107.2 MHz in snes_load); reads are ignored until
 // the port is armed (both strobes high for 1 us, or a write strobe seen), since the PIC holds
 // /RD low until it sets up its port.
@@ -45,11 +43,12 @@ module link_ui #(
     input  wire        clk_vid,
     input  wire [10:0] scr_addr,
     output reg  [15:0] scr_q,
-    // log, read port (any clock, registered here on clk_vid): entry k of the newest 16
-    // (0 = newest): {repeats[15:0], kind[1:0], t_ms[21:0], first byte[7:0], count[23:0], addr[31:0]}
-    input  wire [3:0]  log_idx,
-    output reg  [103:0] log_q,
-    output reg  [31:0] n_log = 32'd0,       // runs logged (new entries)
+    // log (see below), read port on clk_vid: entry log_idx (physical index 0-511), registered
+    input  wire [8:0]  log_idx,
+    output reg  [136:0] log_q,
+    output reg  [31:0] n_log = 32'd0,       // entries made
+    output reg  [26:0] newest = 27'd0,      // indices of the 3 newest entries (newest in [8:0])
+    output wire [8:0]  log_a_n,             // entries in 0-383 (after the first file byte)
     // counters (clk domain)
     output reg  [31:0] ms = 32'd0,          // milliseconds since configuration
     output reg  [31:0] n_stat = 32'd0,      // status reads (0x2xx4)
@@ -58,7 +57,13 @@ module link_ui #(
     output reg  [31:0] n_data = 32'd0,      // data writes (A = 2), all
     output reg  [31:0] n_scr = 32'd0,       // screen bytes written
     output reg  [31:0] last_ui_ms = 32'd0,  // time of the newest UI loop write
-    output reg  [31:0] addr = 32'd0         // the link address register
+    output reg  [31:0] addr = 32'd0,        // the link address register
+    output reg  [31:0] n_rdall = 32'd0,     // reads (all)
+    output reg  [31:0] last_txn_ms = 32'd0, // time of the newest transaction (not file bytes)
+    output reg  [31:0] last_scr_ms = 32'd0, // time of the newest screen write
+    output reg  [7:0]  r21 = 8'd0,          // the newest byte written to 0x1000_0021
+    output reg  [31:0] r21_ms = 32'd0,      // and when
+    output reg  [15:0] n_r21 = 16'd0
 );
     // ------------------------------------------------------------ port
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
@@ -141,15 +146,21 @@ module link_ui #(
                 n_data <= n_data + 32'd1;
                 if (is_file) begin
                     f_go <= 1'b1; f_addr <= addr; f_data <= sd;
-                end else if (is_ui) begin
-                    n_ui <= n_ui + 32'd1;
-                    last_ui_ms <= ms;
                 end else begin
                     ev <= 1'b1; ev_kind <= 1'b0; ev_addr <= addr; ev_byte <= sd;
+                    last_txn_ms <= ms;
+                end
+                if (is_ui) begin
+                    n_ui <= n_ui + 32'd1;
+                    last_ui_ms <= ms;
+                end
+                if (addr == 32'h1000_0021) begin
+                    r21 <= sd; r21_ms <= ms; n_r21 <= n_r21 + 16'd1;
                 end
                 if (is_scr) begin
                     scr_we <= 1'b1; scr_wa <= addr[11:0]; scr_wd <= sd;
                     n_scr <= n_scr + 32'd1;
+                    last_scr_ms <= ms;
                 end
                 addr <= addr + 32'd1;
             end
@@ -161,9 +172,9 @@ module link_ui #(
             d_oe  <= 1'b1;
             if (lat[31:28] == 4'h2 && lat[19:16] == 4'h4) n_stat <= n_stat + 32'd1;
             if (is_pad) n_padrd <= n_padrd + 32'd1;
-            else begin
-                ev <= 1'b1; ev_kind <= 1'b1; ev_addr <= lat; ev_byte <= rdval(lat, pad_q, r2008);
-            end
+            n_rdall <= n_rdall + 32'd1;
+            last_txn_ms <= ms;
+            ev <= 1'b1; ev_kind <= 1'b1; ev_addr <= lat; ev_byte <= rdval(lat, pad_q, r2008);
         end
         if (rd_rise && d_oe) begin
             d_oe <= 1'b0;
@@ -187,59 +198,115 @@ module link_ui #(
     always @(posedge clk_vid) scr_q <= {scr_hi[scr_addr], scr_lo[scr_addr]};
 
     // ------------------------------------------------------------ run compression and log
+    // A run = consecutive transactions of one kind at consecutive addresses; it ends at the
+    // first transaction that doesn't continue it or after 2 ms without any.
     reg        run_on = 1'b0;
     reg        run_kind = 1'b0;
     reg [31:0] run_addr = 32'd0;
-    reg [23:0] run_cnt = 24'd0;
+    reg [15:0] run_cnt = 16'd0;
     reg [7:0]  run_first = 8'd0;
-    reg [21:0] run_t = 22'd0;
+    reg [23:0] run_t = 24'd0;
     reg [31:0] last_act = 32'd0;
-    wire cont = run_on && ev_kind == run_kind && ev_addr == run_addr + {8'd0, run_cnt} &&
-                run_cnt != 24'hffffff;
+    wire cont = run_on && ev_kind == run_kind && ev_addr == run_addr + {16'd0, run_cnt} &&
+                run_cnt != 16'hffff;
     reg        flush = 1'b0;
-    reg [87:0] flush_e;                 // {kind, t, first, count, addr} (1 + 22 + 8 + 24 + 32 = 87)
+    reg        fl_kind = 1'b0;
+    reg [31:0] fl_addr = 32'd0;
+    reg [15:0] fl_cnt = 16'd0;
+    reg [7:0]  fl_d0 = 8'd0;
+    reg [23:0] fl_t = 24'd0;
     always @(posedge clk) begin
         flush <= 1'b0;
         if (ev) begin
             last_act <= ms;
-            if (cont) run_cnt <= run_cnt + 24'd1;
+            if (cont) run_cnt <= run_cnt + 16'd1;
             else begin
                 if (run_on) begin
                     flush <= 1'b1;
-                    flush_e <= {1'b0, run_kind, run_t, run_first, run_cnt, run_addr};
+                    {fl_kind, fl_addr, fl_cnt, fl_d0, fl_t} <= {run_kind, run_addr, run_cnt, run_first, run_t};
                 end
-                run_on <= 1'b1; run_kind <= ev_kind; run_addr <= ev_addr; run_cnt <= 24'd1;
-                run_first <= ev_byte; run_t <= ms[21:0];
+                run_on <= 1'b1; run_kind <= ev_kind; run_addr <= ev_addr; run_cnt <= 16'd1;
+                run_first <= ev_byte; run_t <= ms[23:0];
             end
         end else if (run_on && ms - last_act > 32'd2) begin
             flush <= 1'b1;
-            flush_e <= {1'b0, run_kind, run_t, run_first, run_cnt, run_addr};
+            {fl_kind, fl_addr, fl_cnt, fl_d0, fl_t} <= {run_kind, run_addr, run_cnt, run_first, run_t};
             run_on <= 1'b0;
         end
     end
-    // ring of 16 entries in registers (read from the overlay's clock: quasi-static)
-    (* ramstyle = "logic" *) reg [103:0] ring [0:15];
-    reg [3:0]   head = 4'd0;            // newest entry
-    integer k;
-    initial for (k = 0; k < 16; k = k + 1) ring[k] = 104'd0;
-    // the newest entry's fields and repeat count are kept apart, so a flush needs no read of
-    // the ring (a 16:1 mux) before its write
-    reg [87:0]  last_e = 88'd0;
-    reg [15:0]  last_rep = 16'd0;
-    wire same = n_log != 0 && flush_e[86] == last_e[86] && flush_e[63:0] == last_e[63:0];
-    wire [15:0] rep_next = last_rep == 16'hffff ? last_rep : last_rep + 16'd1;
-    always @(posedge clk)
-        if (flush) begin
-            if (same) begin
-                last_rep <= rep_next;
-                ring[head][103:88] <= rep_next;
+
+    // Log: 512 entries in M10K, {kind, seq[15:0], repeats[15:0], t_last[23:0], t_first[23:0],
+    // first byte, count[15:0], address} (137 bits). Before the first file byte new entries go to
+    // a ring at 384-511; from the first file byte on to 0-383 in order until those are full,
+    // then to the ring again. A run equal (kind, address, count, first byte) to one of the 8
+    // newest entries only updates that entry (repeats + 1, t_last), so a loop of a few different
+    // runs (the UI loop, the status poll) stays a few entries.
+    (* ramstyle = "M10K, no_rw_check" *) reg [136:0] logm [0:511];
+    integer li, lj, lk;
+    // synthesis translate_off
+    initial for (li = 0; li < 512; li = li + 1) logm[li] = 137'd0;
+    // synthesis translate_on
+    reg         lw = 1'b0;
+    reg  [8:0]  lw_a = 9'd0;
+    reg  [136:0] lw_d = 137'd0;
+    always @(posedge clk) if (lw) logm[lw_a] <= lw_d;
+    always @(posedge clk_vid) log_q <= logm[log_idx];
+
+    reg         mark = 1'b0;            // the first file byte has come
+    reg  [8:0]  a_n = 9'd0;             // entries in 0-383
+    reg  [6:0]  ring_p = 7'd0;          // next ring slot (384 + ring_p)
+    reg  [56:0] cam_sig [0:7];          // {kind, address, count, first byte}
+    reg  [8:0]  cam_idx [0:7];
+    reg  [15:0] cam_rep [0:7], cam_seq [0:7];
+    reg  [23:0] cam_tf [0:7];
+    reg  [7:0]  cam_v = 8'd0;
+    initial for (li = 0; li < 8; li = li + 1) begin
+        cam_sig[li] = 57'd0; cam_idx[li] = 9'd0; cam_rep[li] = 16'd0; cam_seq[li] = 16'd0; cam_tf[li] = 24'd0;
+    end
+    wire [56:0] fl_sig = {fl_kind, fl_addr, fl_cnt, fl_d0};
+    reg  [2:0]  hit_j;
+    reg         hit;
+    always @(*) begin
+        hit = 1'b0; hit_j = 3'd0;
+        for (lj = 7; lj >= 0; lj = lj - 1)
+            if (cam_v[lj] && cam_sig[lj] == fl_sig) begin hit = 1'b1; hit_j = lj[2:0]; end
+    end
+    wire [8:0]  new_idx = mark && a_n != 9'd384 ? a_n : {2'b11, ring_p};
+    // (the compare takes a cycle: flushes come >= 2 cycles apart, transactions do)
+    reg         flush_d = 1'b0, hit_q = 1'b0;
+    reg  [2:0]  hit_jq = 3'd0;
+    always @(posedge clk) begin
+        flush_d <= flush;
+        hit_q <= hit;
+        hit_jq <= hit_j;
+    end
+    wire [15:0] rep_q = cam_rep[hit_jq] == 16'hffff ? 16'hffff : cam_rep[hit_jq] + 16'd1;
+    always @(posedge clk) begin
+        lw <= 1'b0;
+        if (f_go) mark <= 1'b1;
+        if (flush_d) begin
+            lw <= 1'b1;
+            if (hit_q) begin
+                lw_a <= cam_idx[hit_jq];
+                lw_d <= {fl_kind, cam_seq[hit_jq], rep_q, fl_t, cam_tf[hit_jq], fl_d0, fl_cnt, fl_addr};
+                cam_rep[hit_jq] <= rep_q;
             end else begin
-                ring[head + 4'd1] <= {16'd1, flush_e};
-                head <= head + 4'd1;
-                last_e <= flush_e;
-                last_rep <= 16'd1;
+                lw_a <= new_idx;
+                lw_d <= {fl_kind, n_log[15:0], 16'd1, fl_t, fl_t, fl_d0, fl_cnt, fl_addr};
+                if (mark && a_n != 9'd384) a_n <= a_n + 9'd1;
+                else ring_p <= ring_p + 7'd1;
                 n_log <= n_log + 32'd1;
+                newest <= {newest[17:0], new_idx};
+                for (lk = 7; lk > 0; lk = lk - 1) begin
+                    cam_sig[lk] <= cam_sig[lk - 1]; cam_idx[lk] <= cam_idx[lk - 1];
+                    cam_rep[lk] <= cam_rep[lk - 1]; cam_seq[lk] <= cam_seq[lk - 1];
+                    cam_tf[lk] <= cam_tf[lk - 1];
+                end
+                cam_v <= {cam_v[6:0], 1'b1};
+                cam_sig[0] <= fl_sig; cam_idx[0] <= new_idx; cam_rep[0] <= 16'd1;
+                cam_seq[0] <= n_log[15:0]; cam_tf[0] <= fl_t;
             end
         end
-    always @(posedge clk_vid) log_q <= ring[head - log_idx];
+    end
+    assign log_a_n = a_n;
 endmodule

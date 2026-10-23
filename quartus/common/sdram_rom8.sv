@@ -37,6 +37,35 @@
 // Ports as sdram_rom.sv (see there), except: rom_addr is a byte address and rom_q as above; the
 // write port and the aux read port take byte addresses and 8-bit data, and both are served only
 // while rom_en = 0 (the loader's case). Timing constraints that go with it: snes_load.sdc.
+//
+// ARAM port (the SPC700's 64 KB, quartus/snes_load v2: bank 3 at byte 0x600000 + address, so the
+// ROM may use banks 0-2 = 6 MB). The S-DSP/SPC700 make one RAM access per DSP substep (~5.2
+// clk_sys, address set at a clk_sys edge, data taken at the next DSP CE edge >= 5 clk_sys = 25
+// clk later, writes at every clk_sys edge of the substep). The controller samples the port at
+// k = 2 (settled; ar_q changes only at k = 3), posts writes in a 4-entry queue (consecutive duplicates dropped, a write to
+// the address in ar_q updates ar_q, reads of a queued address are answered from the queue) and
+// runs one bank-3 operation at a time, started only at k = 0 in command slots the ROM schedule
+// never uses (slot s = clk edges after the start, ROM read with ACT at slot a: a+2 READ, a+4
+// second READ, a+5 PRECHARGE, ACTs only at k = 2-4):
+//   - start allowed when the ROM sequencer is idle (case I) or 3 cycles into a read (case II,
+//     ACT at the previous k = 2); never while a REF runs; REF waits for the bank;
+//   - read:     ACT 0, READ 3, PRECHARGE 5; the byte is captured in `cap` at slot 7 (READ + 4,
+//               as every read) and copied to ar_q at slot 8 (k = 3, two cycles before the next
+//               clk_sys edge); a ROM read at slot 2 puts its READ at 4 (its word follows ours);
+//   - write I:  ACT 0, WRITE 3, BST 4 (unless the ROM's READ is there: it ends the burst
+//               too), PRECHARGE 5 (case I: the bus is free at 3, a ROM read at slot 2 returns
+//               data from 7 on, after the write);
+//   - write II: ACT 0, WRITE 8, BST 9 (unless the ROM's READ is there), PRECHARGE 10 (case II:
+//               the ROM's last word is due at 4 and may stay on the bus until ~5 + 1 ns; its
+//               next read (ACT 7) puts its READ at 9 and its data at 12);
+//   - a ROM ACT is held off at A's command slots (it then counts as late; only reads that were
+//     already late can land there). The next start is >= 10 cycles on (tRC, tRP of bank 3;
+//     15 after a write II).
+// Reading through `cap` would overwrite the ROM byte a covered read still uses, so the byte in
+// cap is kept in cap_hold just before (slot 7) and rom_q takes it from there until the next
+// ROM capture. Read latency: request seen at k = 2 of the cycle that set the address, start at
+// the next k = 0 (or one later if blocked), byte in ar_q 13-18 clk after the address change;
+// ar_q changes only at k = 3 (completions, and answers from the queue / writes to its address).
 module sdram_rom8 #(
     parameter integer CAPTURE_HALF = 8,       // read capture point (8 = rise 4)
     parameter [11:0]  MRS_PINS     = 12'h037,
@@ -98,7 +127,21 @@ module sdram_rom8 #(
     output reg  [15:0] n_rf_stall = 16'd0,
     output reg  [15:0] n_late = 16'd0,
     output reg  [10:0] rf_max = 11'd0,
-    output reg  [31:0] n_reads = 32'd0      // ROM-port reads started
+    output reg  [31:0] n_reads = 32'd0,     // ROM-port reads started
+
+    // ARAM port (clk_sys signals, sampled at k = 4; see above)
+    input  wire        ar_en,           // the port is live (the SNES runs; rom_en = 1)
+    input  wire [15:0] ar_addr,
+    input  wire        ar_rd,           // the core reads ar_addr this clk_sys cycle
+    input  wire        ar_wr,           // the core writes ar_d to ar_addr at the next clk_sys edge
+    input  wire [7:0]  ar_d,
+    output reg  [7:0]  ar_q = 8'd0,
+    output reg  [31:0] n_ar_rd = 32'd0,     // SDRAM reads
+    output reg  [31:0] n_ar_wr = 32'd0,     // SDRAM writes
+    output reg  [15:0] n_ar_fwd = 16'd0,    // reads answered from the write queue
+    output reg  [15:0] n_ar_late = 16'd0,   // reads that may miss a 5-clk_sys deadline
+    output reg  [15:0] n_ar_drop = 16'd0,   // writes lost to a full queue
+    output reg  [15:0] n_clash = 16'd0      // (simulation check) two command sources at once
 );
     // ------------------------------------------------------------------ SDRAM clock
     altddio_out #(
@@ -181,6 +224,91 @@ module sdram_rom8 #(
     reg  [7:0]  cap_lo = 8'd0;          // byte A of an even-start read, kept for the low lane
     reg  [7:0]  cap = 8'd0;             // the capture register (I/O-cell input register)
 
+    // ------------------------------------------------------------------ ARAM port state
+    localparam [1:0] A_RD = 2'd0, A_WI = 2'd1, A_WII = 2'd2;
+    reg         a_on = 1'b0;            // a bank-3 operation is running (slots 1-9)
+    reg  [3:0]  a_slot = 4'd0;          // slot of the current edge while a_on
+    reg  [1:0]  a_op = A_RD;
+    reg  [15:0] a_addr = 16'd0;
+    reg  [7:0]  a_data = 8'd0;
+    reg         a_stale = 1'b0;         // a write to a_addr was posted during this read
+    reg  [15:0] wq_a [0:3];             // write queue, head = 0
+    reg  [7:0]  wq_d [0:3];
+    reg  [2:0]  wq_n = 3'd0;
+    reg         rq_need = 1'b0;         // a read is wanted (latest k = 2 sample)
+    reg  [15:0] rq_addr = 16'd0;
+    reg  [2:0]  rq_age = 3'd0;          // k = 0 edges the request has waited
+    reg  [15:0] tag = 16'd0;            // ar_q holds the byte at tag
+    reg         tag_ok = 1'b0;
+    reg  [15:0] cur_rd = 16'd0;         // the address the core reads now (latest sample)
+    reg         upd = 1'b0;             // ar_q <= upd_d (tag <= upd_tag) at the next k = 3
+    reg  [7:0]  upd_d = 8'd0;
+    reg  [15:0] upd_tag = 16'd0;
+    reg         fwd_evt = 1'b0;
+    reg         last_wv = 1'b0;         // the newest write taken (to drop repeats)
+    reg  [15:0] last_wa = 16'd0;
+    reg  [7:0]  last_wd = 8'd0;
+    reg         hold_sel = 1'b0;        // rom_q's high lane from cap_hold (cap has an ARAM byte)
+    reg  [7:0]  cap_hold = 8'd0;
+    reg  [7:0]  rdar = 8'd0;            // rdar[k]: an ARAM READ left the pins k cycles ago
+    reg  [7:0]  rdrom = 8'd0;           // the same for ROM-port READs
+    integer     qi;
+    initial for (qi = 0; qi < 4; qi = qi + 1) begin wq_a[qi] = 16'd0; wq_d[qi] = 8'd0; end
+
+    wire        case1 = st == S_IDLE && !rf_limit;
+    wire        case2 = st == S_READ && cnt == 15'd3;
+    wire        a_start = ar_en && ready && k_now == 3'd0 && !a_on && (case1 || case2) &&
+                          (rq_need || wq_n != 3'd0);
+    wire        a_rdop = rq_need;                   // the operation a_start begins
+    wire [15:0] a_saddr = rq_need ? rq_addr : wq_a[0];
+    wire        rom_rd_now = st == S_READ && (cnt == T_RCD[14:0] || (even_rd && cnt == RD2[14:0]));
+    // A's commands at this edge (hard: nothing else may use the edge) and in the next ones
+    reg  [3:0]  a_cmd;
+    reg         a_hard;
+    reg  [11:0] a_pa;
+    reg  [15:0] a_res;                  // a_res[i]: A has a hard command at edge now + i
+    integer     ri;
+    always @(*) begin
+        a_cmd = C_NOP; a_hard = 1'b0; a_pa = 12'd0; a_res = 16'd0;
+        if (a_start) begin
+            a_cmd = C_ACT; a_hard = 1'b1; a_pa = {5'd0, a_saddr[15:9]};
+            if (a_rdop || case1) begin a_res[3] = 1'b1; a_res[5] = 1'b1; end
+            else begin a_res[8] = 1'b1; a_res[10] = 1'b1; end
+        end else if (a_on) begin
+            case (a_op)
+                A_RD: begin
+                    if (a_slot == 4'd3) begin a_cmd = C_RD; a_hard = 1'b1; a_pa = {3'd0, a_addr[8:0]}; end
+                    if (a_slot == 4'd5) begin a_cmd = C_PRE; a_hard = 1'b1; end
+                end
+                A_WI: begin
+                    if (a_slot == 4'd3) begin a_cmd = C_WR; a_hard = 1'b1; a_pa = {3'd0, a_addr[8:0]}; end
+                    if (a_slot == 4'd4 && !rom_rd_now) begin a_cmd = C_BST; a_hard = 1'b1; end
+                    if (a_slot == 4'd5) begin a_cmd = C_PRE; a_hard = 1'b1; end
+                end
+                default: begin
+                    if (a_slot == 4'd8) begin a_cmd = C_WR; a_hard = 1'b1; a_pa = {3'd0, a_addr[8:0]}; end
+                    if (a_slot == 4'd9 && !rom_rd_now) begin a_cmd = C_BST; a_hard = 1'b1; end
+                    if (a_slot == 4'd10) begin a_cmd = C_PRE; a_hard = 1'b1; end
+                end
+            endcase
+            for (ri = 0; ri < 16; ri = ri + 1) begin
+                if (a_op == A_RD && (a_slot + ri == 3 || a_slot + ri == 5)) a_res[ri] = 1'b1;
+                // (write I's BST at 4 gives way to a ROM READ there; a ROM ACT there is held off)
+                if (a_op == A_WI && (a_slot + ri == 3 || a_slot + ri == 5 || (ri == 0 && a_slot == 4'd4)))
+                    a_res[ri] = 1'b1;
+                if (a_op == A_WII && (a_slot + ri == 8 || a_slot + ri == 10 || (ri == 0 && a_slot == 4'd9)))
+                    a_res[ri] = 1'b1;
+            end
+        end
+    end
+    // a ROM ACT now needs this edge and its READ/second READ/PRECHARGE edges (+2, +4, +5) free
+    wire        a_block = a_res[0] || a_res[2] || a_res[4] || a_res[5];
+    // synthesis translate_off
+    wire        rom_cmd_now = (st == S_READ && (cnt == T_RCD[14:0] || (even_rd && cnt == RD2[14:0]) ||
+                                                cnt == RD_PRE[14:0])) ||
+                              (st == S_IDLE && ((rf_now && !a_on && !a_start) || (rom_en && rd_req && !a_block)));
+    // synthesis translate_on
+
     reg [3:0] sd_cmd = 4'b1111;         // internal: must power up deselected (notes/quartus.md)
     assign {sd_cs_n, sd_ras_n, sd_cas_n, sd_we_n} = sd_cmd;
     task cmd(input [3:0] c);
@@ -196,6 +324,8 @@ module sdram_rom8 #(
         rdp      <= {rdp[5:0], 1'b0};
         rda      <= {rda[6:0], 1'b0};
         rd2      <= {rd2[6:0], 1'b0};
+        rdar     <= {rdar[6:0], 1'b0};
+        rdrom    <= {rdrom[6:0], 1'b0};
         cnt      <= cnt + 15'd1;
         if (rcnt != 11'h7ff) rcnt <= rcnt + 11'd1;
         rf_soft  <= rcnt >= RF_SOFT - 1;        // (true in the cycle rcnt reaches RF_SOFT)
@@ -261,11 +391,11 @@ module sdram_rom8 #(
                 end
                 wdat   <= wr_data;
                 aux_rd <= !rom_en;
-                if (rf_now) begin
+                if (rf_now && !a_on && !a_start) begin
                     cmd(C_REF);
                     st <= S_WAIT;
                 end else if (rom_en) begin
-                    if (rd_req) begin
+                    if (rd_req && !a_block) begin
                         cmd(C_ACT);
                         st <= S_READ;
                     end
@@ -302,11 +432,13 @@ module sdram_rom8 #(
                     cmd(C_RD); sd_ba <= bank; sd_a <= {3'b000, col};
                     rdp[0] <= 1'b1;
                     rda[0] <= aux_rd;
+                    rdrom[0] <= !aux_rd;
                 end
                 if (even_rd && cnt == RD2[14:0]) begin
                     cmd(C_RD); sd_ba <= bank; sd_a <= {3'b000, col | 9'd1};
                     rdp[0] <= 1'b1;
                     rd2[0] <= 1'b1;
+                    rdrom[0] <= 1'b1;
                 end
                 if (cnt == RD_PRE[14:0]) begin cmd(C_PRE); sd_ba <= bank; end
                 if (cnt == RD_END[14:0] - 15'd1) st <= S_IDLE;
@@ -340,6 +472,108 @@ module sdram_rom8 #(
             cap_lo <= cap;
             lo_sel <= 1'b1;
         end
+
+        // ---------------------------------------------------------- ARAM port
+        // requests: sampled at k = 2 (the core's signals settled, as the ROM address); ar_q
+        // changes only at k = 3, so what the core derives from it has until the next k = 2
+        if (k_now == 3'd2 && ar_en) begin : sample
+            reg        hit;
+            reg [7:0]  hd;
+            reg [2:0]  n;
+            hit = 1'b0; hd = 8'd0;
+            if (a_on && a_op != A_RD && a_addr == ar_addr) begin hit = 1'b1; hd = a_data; end
+            for (qi = 0; qi < 4; qi = qi + 1)
+                if (qi < wq_n && wq_a[qi] == ar_addr) begin hit = 1'b1; hd = wq_d[qi]; end
+            if (ar_rd) cur_rd <= ar_addr;
+            if (ar_rd) begin
+                if (hit) begin
+                    upd <= 1'b1; upd_d <= hd; upd_tag <= ar_addr;
+                    rq_need <= 1'b0;
+                    fwd_evt <= !(tag_ok && tag == ar_addr);     // (counted next cycle)
+                end else if ((tag_ok && tag == ar_addr) ||
+                             (a_on && a_op == A_RD && a_addr == ar_addr && !a_stale))
+                    rq_need <= 1'b0;
+                else begin
+                    if (!rq_need || rq_addr != ar_addr) rq_age <= 3'd0;
+                    rq_need <= 1'b1;
+                    rq_addr <= ar_addr;
+                end
+            end else
+                rq_need <= 1'b0;
+            if (ar_wr && !(last_wv && last_wa == ar_addr && last_wd == ar_d)) begin
+                last_wv <= 1'b1; last_wa <= ar_addr; last_wd <= ar_d;
+                if (tag_ok && tag == ar_addr) begin
+                    upd <= 1'b1; upd_d <= ar_d; upd_tag <= ar_addr;
+                end
+                if (a_on && a_op == A_RD && a_addr == ar_addr) a_stale <= 1'b1;
+                // queue: coalesce with the newest entry of the same address, else append
+                n = wq_n;
+                if (n != 3'd0 && wq_a[n - 3'd1] == ar_addr) wq_d[n - 3'd1] <= ar_d;
+                else if (n != 3'd4) begin
+                    wq_a[n[1:0]] <= ar_addr; wq_d[n[1:0]] <= ar_d; wq_n <= n + 3'd1;
+                end else if (n_ar_drop != 16'hffff) n_ar_drop <= n_ar_drop + 16'd1;
+            end
+        end
+        if (rdar[CAP_N] && a_op == A_RD) begin   // slot 8: the ARAM byte is in cap
+            if (!a_stale && cur_rd == a_addr) begin
+                ar_q <= cap; tag <= a_addr; tag_ok <= 1'b1;
+            end
+        end
+        if (fwd_evt) begin
+            fwd_evt <= 1'b0;
+            if (n_ar_fwd != 16'hffff) n_ar_fwd <= n_ar_fwd + 16'd1;
+        end
+        if (k_now == 3'd3 && upd) begin           // (after a read completion at the same edge)
+            upd <= 1'b0;
+            ar_q <= upd_d; tag <= upd_tag; tag_ok <= 1'b1;
+        end
+        if (k_now == 3'd0 && rq_need && rq_age != 3'd7) rq_age <= rq_age + 3'd1;
+        // operations
+        if (a_start) begin
+            a_on <= 1'b1;
+            a_slot <= 4'd1;
+            a_stale <= 1'b0;
+            if (a_rdop) begin
+                a_op <= A_RD; a_addr <= rq_addr;
+                rq_need <= 1'b0;
+                n_ar_rd <= n_ar_rd + 32'd1;
+                // late: the byte lands after E + 23 (start after the third k = 0 since the
+                // address change at E), too late for a DSP CE edge 5 clk_sys after E
+                if (rq_age > 3'd2 && n_ar_late != 16'hffff) n_ar_late <= n_ar_late + 16'd1;
+            end else begin
+                a_op <= case1 ? A_WI : A_WII; a_addr <= wq_a[0]; a_data <= wq_d[0];
+                for (qi = 0; qi < 3; qi = qi + 1) begin
+                    wq_a[qi] <= wq_a[qi + 1]; wq_d[qi] <= wq_d[qi + 1];
+                end
+                wq_n <= wq_n - 3'd1;
+                n_ar_wr <= n_ar_wr + 32'd1;
+                // (a write sampled at this same edge can't be: samples are at k = 4)
+            end
+        end else if (a_on) begin
+            a_slot <= a_slot + 4'd1;
+            if (a_slot == (a_op == A_WII ? 4'd10 : 4'd9)) a_on <= 1'b0;
+        end
+        if (a_hard) begin
+            // synthesis translate_off
+            if (rom_cmd_now) begin
+                $display("sdram_rom8: command clash at %0t (A slot %0d op %0d)", $time, a_slot, a_op);
+                n_clash <= n_clash + 16'd1;
+            end
+            // synthesis translate_on
+            cmd(a_cmd); sd_ba <= 2'd3; sd_a <= a_pa;
+            if (a_on && a_cmd == C_RD) begin rdp[0] <= 1'b1; rdar[0] <= 1'b1; end
+            if (a_on && a_cmd == C_WR) begin sd_dq_out <= {a_data, a_data}; sd_dq_oe <= 1'b1; end
+        end
+        // the byte in cap goes to cap_hold just before an ARAM byte replaces it, and rom_q takes
+        // it from there until the next ROM-port capture
+        if (rdar[CAP_N - 1]) begin
+            if (!hold_sel) cap_hold <= cap;
+            hold_sel <= 1'b1;
+        end
+        if (rdrom[CAP_N - 1]) hold_sel <= 1'b0;
+        if (!ar_en && !a_on) begin
+            tag_ok <= 1'b0; rq_need <= 1'b0; wq_n <= 3'd0; last_wv <= 1'b0; upd <= 1'b0;
+        end
         if (reset) begin
             st    <= S_POWER;
             cnt   <= 15'd0;
@@ -363,6 +597,7 @@ module sdram_rom8 #(
             always @(posedge clk) aux_valid <= rda[CAP_N];
         end
     endgenerate
-    assign rom_q = {cap, lo_sel ? cap_lo : cap};
+    wire [7:0] cap_r = hold_sel ? cap_hold : cap;
+    assign rom_q = {cap_r, lo_sel ? cap_lo : cap_r};
     assign aux_q = cap;
 endmodule

@@ -351,7 +351,7 @@ chord file was run (results below); the link part showed why nothing else could 
 | 10/11 | plltest / blinky | only if 05/06 show nothing |
 | 12 | q-hwtest | v5: the player's screen captured and shown (text, tile maps, bit images for tools/bitdump.py), a press every 4 s; answer 02 from the start; pads, SDRAM, audio as v4 (see Next session) |
 | 13 | q-snes_sdram | as 09, but the ROM runs from SDRAM (built for 16 bit/1024 columns/AB10 high: superseded by 14) |
-| 14 | q-snes_load | the player's file browser; RUN on "0 SA1 TEST.spc" loads the SA-1 test ROM into SDRAM chip B and runs it (`notes/snes-load.md`, "Console test") |
+| 14 | q-snes_load | v2: the way back to the player's menu (DOWN+SELECT), 64 KB save RAM (Kirby's Dream Land 3, Super Mario RPG), kept saves, the full PIC log (`notes/snes-load.md`, "Console test (v2)") |
 | 00 | stock JB7.2 | restore |
 
 ## Results
@@ -440,3 +440,8 @@ chord file was run (results below); the link part showed why nothing else could 
     core as running; how the stock core gets back to the PIC's menu (menu button combo detected
     by the core and signalled through a status register?) is the next thing to decode.
   - Recording: `~/scratch/cap/rec-20261023-082437.mkv` (test at the end, ~62–67 min).
+
+- 23 Oct 2026, snes_load **v2 built** (not yet run): stock pad-poll waveform, pad registers
+  always answered, the core follows the PIC's screen when it wakes (DOWN+SELECT expected, by the
+  decode in notes/pic-link.md, "After a file"), ARAM in SDRAM, 64 KB save RAM, full PIC log.
+  One-run test script: notes/snes-load.md, "Console test (v2)".

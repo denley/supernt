@@ -354,6 +354,53 @@ preceded it). Reads of `0x2000`/`0x2001` are counted, not logged, and the log ke
   formats, bit images decoded by `tools/bitdump.py`), with one press every 4 s and a screen
   dump before each, and counts only writes outside the UI's regions as "the file".
 
+## After a file: how does the player get back to its menu? (23 Oct 2026, for snes_load v2)
+
+Console (snes_load v1, Kirby and Gradius runs): after the last file byte the PIC writes 8 bytes
+at `0x1018_0F6C` (screen cells, spaces), `0x1000_D129` = 00, `0x0000_00FE` = 06, `0x1000_0102`
+= 00, `0x1000_0010` = 00, ~50 ms later `0x1000_0021` = F8, runs its UI loop once more and then
+does **nothing at all on the link**: v1's address register stayed at `0x2001_0003` (the end of
+that last pad read; any read or write would have moved it) for the 0.45 s / 2 s the page was
+photographed, and its browser never changed again. (v1 logged reads too, except pad reads at
+`0x2000`-`0x2009`, which it only counted; a frozen address register rules those out as well.)
+So in "playing" mode the PIC waits on something other than the link.
+
+Decode of `build/spc.bt` (`~/scratch/menu/`, throwaway: `xcone.py` = cross-domain backward
+cone of each output pin, `allpins.py`, `h15*.py` = the link-domain cycle model of
+`~/scratch/netfix` plus H15's cone):
+
+- **No output pin carries the pad** [likely]: of all 160 configured pins only the eight link
+  data pins (the read mux) and M16 (HDMI DE, through shared link-domain registers) have the
+  poller's shift/capture registers in their cones; the capture registers feed nothing but the
+  link read mux (forward trace). So the stock core has **no menu-combination detector and no
+  interrupt line to the PIC**; whatever stops the playback is done by the PIC itself.
+- Logic-driven outputs the stock core has and snes_load doesn't drive: the x16 SDRAM / 148.5
+  MHz controller pins (top bank, N6-R9 etc.), the PCM1808 ADC clocks (M8, H18, J19), a group
+  written over the link (`LAB.025.041`: A7 C6 B6 B7 C13 C15 D17, and the open-drain group B11
+  A8 B10 A10 A9 A12 B12 C16, read back at `0x01xx_xxxx`; 245-register cones in the link and
+  148.5 MHz domains), G6 (open drain, autonomous, three M10Ks: an I2C-like master?), and five
+  pins with ~2200-register cones that include the link, M10Ks and DSP blocks: H14, H15, F14
+  (three alike: an RGB LED PWM fits, the JB7.2 changelog mentions the SPC player's LED colour
+  [guess]), G13 and F10. None is a plausible "attention" line (none depends on the pad; their
+  link-side loads didn't fire for any of the post-file writes in the link-domain model). Not
+  driven by v2.
+- The post-file writes: `0x1000_0021` = F8 lands in the byte-lane registers of the 32-bit
+  register window (lane 1: `MLAB.013.018.7`, `MLAB.013.019.3`, `MLAB.018.016.4`), i.e. a
+  register at `0x1000_0020` whose consumer is on the memory side (other clock domains), not
+  traced [open]; the others touch only the generic address/request pipeline in the link domain.
+  Most likely "start playback / show the player screen" [guess].
+- The JB documentation (SmokeMonster's Super-NT-Jailbreak README): the **menu combination is
+  DOWN + SELECT** ("open the menu (SELECT and DOWN)"), and the JB6.5 changelog fixed "some games
+  disabling the return-to-menu shortcut", i.e. the shortcut depends on how the game polls the
+  pad. With no pad-derived output in spc.cor, the PIC must **watch the controller lines itself**
+  (LATCH/CLOCK/DATA as the core drives them) [likely, not observed]. v1 polled at 1 kHz with a
+  different waveform (12 us latch, 32 x 6/6 us) and nobody pressed DOWN+SELECT; v2 drives the
+  stock waveform (16.17 ms, 8.3 us latch, 33 x 0.6/18.7 us, notes/controllers.md) and passes
+  the pad registers through all the time, as spc.cor does.
+- Fallbacks if DOWN+SELECT doesn't wake it: the console's RESET button (read by the PIC), and
+  the ID666 song length (a 20 s file: whatever the player does when a song ends shows up in
+  v2's log). See notes/snes-load.md, "Console test (v2)".
+
 ## The capture, decoded
 
 Logger events `S:DD+TT`. S = {AB20 AA20 AA19 U21} = {A2 A1 A0 /RD}; the cycle 3 → 9 → B → 5 → 1

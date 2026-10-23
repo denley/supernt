@@ -15,13 +15,17 @@
 //     `stat`, sampled once per frame; 56-63 per text row from `rowstat`, which the caller
 //     presents for `row_next`), conditional text on bits of word FLAG_WORD, external cells
 //     (template code 7F) showing the byte `ext_q` the caller reads for (ext_row, ext_col).
+//   mode 3, log view (v2): the same template with rows remapped: screen rows 0-1 show template
+//     rows LOG_T0 and LOG_T0 + 1 (titles), rows 2-21 all show template row LOG_T0 + 2 (one log
+//     entry per row, its fields from `rowstat`, which the caller presents for `row_next`).
 //   mode 0: nothing (valid = 0).
 // Timing: hx/vy are snes_video's counters (cycle 0); r/g/b/valid are registered at cycle 6, so
 // the caller delays snes_video's outputs (registered at cycle 3) by 3 clocks.
 module overlay #(
     parameter TMPL_HEX = "diag.hex",
     parameter FONT_HEX = "font.hex",
-    parameter integer FLAG_WORD = 1
+    parameter integer FLAG_WORD = 1,
+    parameter integer LOG_T0 = 18
 ) (
     input  wire          clk,
     input  wire [10:0]   hx,
@@ -82,9 +86,10 @@ module overlay #(
     reg [3:0]  dgy1, bgy1;
     reg        din1, bin1;
     reg [1:0]  m1;
+    wire [4:0] trow = mode != 2'd3 ? vy[9:5] : vy[9:5] < 5'd2 ? LOG_T0[4:0] + vy[9:5] : LOG_T0[4:0] + 5'd2;
     always @(posedge clk) begin
-        ta1 <= {vy[9:5], 6'd0} + {2'd0, vy[9:5], 4'd0} + {4'd0, hx[10:4]};
-        ext_row <= vy[9:5];
+        ta1 <= {trow, 6'd0} + {2'd0, trow, 4'd0} + {4'd0, hx[10:4]};
+        ext_row <= trow;
         ext_col <= hx[10:4];
         dgx1 <= hx[3:1];
         dgy1 <= vy[4:1];

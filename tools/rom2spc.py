@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Wrap a SNES ROM in a file the Super Nt's SPC player accepts and sends over the PIC32 link.
 
-Usage: rom2spc.py ROM OUT.spc [--title TEXT] [--pad SIZE]
+Usage: rom2spc.py ROM OUT.spc [--title TEXT] [--pad SIZE] [--length SECONDS]
 
 The SPC player (Tools -> "Play SPC Files", JB7.2) checks that a file is an SPC and then writes
 the whole file verbatim to link address 0x0000_FF00 + file offset (notes/hardware-tests.md,
@@ -27,6 +27,8 @@ so ROM byte k arrives at link address 0x2_0100 + k. Info block (little-endian):
   +0x20 32  ROM name (ASCII, space-padded): the core shows it on its diagnostics page
 
 --pad SIZE appends filler after the ROM (whole file SIZE bytes), only for transfer tests.
+--length SECONDS sets the ID666 song length (default 999, the most the text tag holds; a
+short one is a test of what the player does when a "song" ends: snes_load v2 logs it).
 Prints the sizes and CRC-32s the core's diagnostics page shows (whole file, ROM part) and the
 header detection.
 """
@@ -48,7 +50,7 @@ def tag(s, n):
     return b + b'\0' * (n - len(b))
 
 
-def silent_spc(title):
+def silent_spc(title, length=999):
     ram = bytearray(0x10000)
     ram[0x0400:0x0402] = bytes([0x2F, 0xFE])            # bra * (the SPC700 idles)
     dsp = bytearray(128)
@@ -62,7 +64,7 @@ def silent_spc(title):
     hdr[0x2E:0x4E] = tag(title, 32)                      # song title
     hdr[0x4E:0x6E] = tag('SNES ROM for snes_load', 32)   # game title
     hdr[0x7E:0x9E] = tag('supernt rom2spc', 32)          # comments
-    hdr[0xA9:0xAC] = tag('999', 3)                      # longest the text tag holds (16:39)
+    hdr[0xA9:0xAC] = tag(str(length), 3)                # seconds (999 = 16:39, the most it holds)
     hdr[0xAC:0xB1] = tag('0', 5)
     hdr[0xB1:0xD1] = tag('supernt', 32)
     spc = hdr + ram + dsp + bytes(64) + ram[0xFFC0:]
@@ -125,6 +127,7 @@ def main():
     ap.add_argument('out')
     ap.add_argument('--title', help='name shown on the diagnostics page and in the ID666 tag')
     ap.add_argument('--pad', type=lambda s: int(s, 0), default=0)
+    ap.add_argument('--length', type=int, default=999, help='ID666 song length in seconds (1-999)')
     a = ap.parse_args()
 
     rom = open(a.rom, 'rb').read()
@@ -135,7 +138,7 @@ def main():
     rom_type, hdr, scores = header_guess(rom)
     crc_rom = zlib.crc32(rom)
 
-    spc = silent_spc(title)
+    spc = silent_spc(title, max(1, min(999, a.length)))
     info = bytearray(64)
     info[0:8] = b'SNTROM01'
     struct.pack_into('<II', info, 8, len(rom), crc_rom)

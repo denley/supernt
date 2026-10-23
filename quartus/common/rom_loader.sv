@@ -91,11 +91,20 @@ module rom_loader #(
     output reg  [31:0] hdr_w1 = 32'd0,      // {region, dev, checksum[15:0]}
     output reg  [15:0] hdr_compl = 16'd0,
     output reg         ok_info = 1'b0,      // crc_sd == info_crc (and sizes match)
-    output reg         ok_fly = 1'b0        // crc_sd == crc_rom
+    output reg         ok_fly = 1'b0,       // crc_sd == crc_rom
+    // v2: save RAM kept across reloads of the same game (ROM CRC-32 as the last game booted);
+    // BW-RAM/SRAM is cleared (by the top, while `ram_clear`) when another game is booted
+    output reg         ram_keep = 1'b0,     // valid from SHOW on
+    output wire        ram_clear,           // SHOW and not ram_keep: the top clears the RAM
+    output reg  [31:0] last_game = 32'd0,   // ROM CRC-32 of the game booted last (0: none)
+    output reg         aram_clr_done = 1'b0 // ARAM (SDRAM bank 3) cleared for this boot
 );
     localparam [2:0] S_IDLE = 0, S_LOAD = 1, S_PARSE = 2, S_VERIFY = 3, S_SHOW = 4, S_RUN = 5,
                      S_FAIL = 6, S_NOTROM = 7;
     localparam [31:0] ROM_OFF = 32'h10200, INFO_OFF = 32'h10180;
+    localparam [22:0] ARAM_BASE = 23'h600000;     // sdram_rom8.sv's ARAM bank
+    reg  [16:0] aclr = 17'd0;                     // ARAM bytes cleared (SHOW)
+    assign ram_clear = (state == S_SHOW || state == S_FAIL) && !ram_keep;
 
     function [31:0] crc8(input [31:0] c, input [7:0] b);    // reflected CRC-32, one byte
         integer i;
@@ -227,7 +236,7 @@ module rom_loader #(
     reg [31:0] t_last = 32'd0;
     reg [23:0] vk = 24'd0;                      // verify: next byte to read
     reg [23:0] vn = 24'd0;                      // verify: bytes checked
-    wire [23:0] vlim = rom_size[31:23] != 9'd0 ? 24'h800000 : rom_size[23:0];
+    wire [23:0] vlim = rom_size[31:23] != 9'd0 || rom_size[22:21] == 2'b11 ? 24'h600000 : rom_size[23:0];
     reg [31:0] vcrc = 32'hFFFFFFFF;
     reg [31:0] fcrc = 32'hFFFFFFFF, rcrc = 32'hFFFFFFFF;
     reg [31:0] t_show = 32'd0;
@@ -279,7 +288,7 @@ module rom_loader #(
                 t_we <= 1'b1; t_wa <= {2'd3, b_off[4:0]}; t_wd <= b_d;
             end
             if (b_rom) begin
-                if (b_k[31:23] != 9'd0) n_big <= n_big + 32'd1;
+                if (b_k[31:23] != 9'd0 || b_k[22:21] == 2'b11) n_big <= n_big + 32'd1;   // >= 6 MB: the ARAM bank
                 else if (f_full) n_drop <= n_drop + 32'd1;
                 else begin
                     push <= 1'b1;
@@ -339,17 +348,39 @@ module rom_loader #(
                     ok_fly <= ~vcrc == crc_rom;
                     t_show <= ms;
                     state <= (info_ok ? ~vcrc == info_crc && info_size == rom_size : ~vcrc == crc_rom) ? S_SHOW : S_FAIL;
+                    ram_keep <= last_game != 32'd0 && last_game == ~vcrc;
+                    aclr <= 17'd0;
+                    aram_clr_done <= 1'b0;
                 end
             end
-            S_SHOW: if (ms - t_show >= SHOW_MS) begin
-                rom_en <= 1'b1;
-                t_boot <= ms;
-                state <= S_RUN;
+            S_SHOW: begin
+                // ARAM to zero (as the block RAM it replaces powered up), through the write FIFO
+                if (!aram_clr_done && !f_full && !push) begin
+                    push <= 1'b1;
+                    push_d <= {ARAM_BASE + {6'd0, aclr}, 8'h00};
+                    aclr <= aclr + 17'd1;
+                    if (aclr == 17'hFFFF) aram_clr_done <= 1'b1;
+                end
+                if (ms - t_show >= SHOW_MS && aram_clr_done && f_empty && !wr_req) begin
+                    rom_en <= 1'b1;
+                    t_boot <= ms;
+                    last_game <= crc_sd;
+                    state <= S_RUN;
+                end
             end
             S_FAIL: if (force_boot) begin
-                rom_en <= 1'b1;
-                t_boot <= ms;
-                state <= S_RUN;
+                if (!aram_clr_done && !f_full && !push) begin
+                    push <= 1'b1;
+                    push_d <= {ARAM_BASE + {6'd0, aclr}, 8'h00};
+                    aclr <= aclr + 17'd1;
+                    if (aclr == 17'hFFFF) aram_clr_done <= 1'b1;
+                end
+                if (aram_clr_done && f_empty && !wr_req) begin
+                    rom_en <= 1'b1;
+                    t_boot <= ms;
+                    last_game <= crc_sd;
+                    state <= S_RUN;
+                end
             end
             default: ;
         endcase

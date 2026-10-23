@@ -235,6 +235,14 @@ t (clocks)   P14  J13/K16
 - Whether J13 = port 1 clock and K16 = port 2 clock or the reverse (irrelevant while both get
   the same signal).
 
+## Used by quartus/snes_load v2 (Oct 2026)
+
+`quartus/common/pad_poll.sv` now drives the stock waveform above by default (latch 8.3 us, 33
+low pulses of 0.6 us every 19.3 us, first 16.5 us after the latch rose, sampled as the clock
+falls, a poll every 16.17 ms), with v1's 1 kHz / 12 us / 32 x 6 us timing as a runtime option:
+if the PIC watches the controller lines for the menu combination (notes/pic-link.md, "After a
+file"), it then sees what spc.cor makes.
+
 ## Recommendation for a test core
 
 Only use the pins and I/O settings spc.cor itself uses for the pads:

@@ -2,8 +2,8 @@
 // Super Nt top level: SNES + SA-1 core that loads its ROM from the SD card through the SPC
 // player (notes/snes-load.md). The console loads this as SYSTEM/CORES/spc.cor; Tools -> "Play
 // SPC Files" starts it and the PIC32 runs the player's file browser on it:
-//   - link_ui.sv answers the PIC (status 02, pad registers, 0x2008 = 01) and keeps the
-//     browser's screen (0x1018_0000), which the overlay draws until a game runs;
+//   - link_ui.sv answers the PIC (status 02, pad registers, 0x2008 = 01), keeps the browser's
+//     screen (0x1018_0000), which the overlay draws, and logs every transaction but the file;
 //   - picking a file made by tools/rom2spc.py (a silent .spc with the ROM appended) makes the
 //     PIC send the whole file to link address 0xFF00 + offset; rom_loader.sv stores the ROM in
 //     SDRAM chip B (sdram_rom8.sv, 8-bit), detects the mapper from the header, reads the ROM
@@ -11,13 +11,21 @@
 //     diagnostics page and then releases the SNES (reset, ROM reads on);
 //   - the SNES core (quartus/snes_sdram/snes_sdram_core.sv: srg320's MiSTer core with SA-1 and
 //     the Lo/HiROM mapper; SA1.vhd with sa1_vbp.patch) reads the ROM through the 8-bit
-//     controller at 5 x clk_sys; video/audio as quartus/snes.
-// Controller port 1 is polled by pad_poll.sv only; the SNES gets the bits through a virtual 4021
-// (as MiSTer's ioport.sv), the PIC through 0x2000/0x2001, each only while its view is shown:
-//   before a game: file browser (PIC gets the pad);  while a game runs: the game (SNES gets it);
-//   hold L+R+SELECT 0.5 s: diagnostics page on/off;  L+R+START: browser on/off (to pick another
-//   file: a new transfer stops the game and loads it);  L+R+A: boot after a failed verify.
-// The diagnostics page is shown by itself from the first file byte until the game starts.
+//     controller at 5 x clk_sys; v2: the SPC700's 64 KB ARAM lives in SDRAM bank 3 too (the
+//     controller's ARAM port), which frees the block RAM for 64 KB of BW-RAM/SRAM (kept when
+//     the same game is loaded again, cleared for another); video/audio as quartus/snes.
+// Controller port 1 is polled by pad_poll.sv only (v2: the stock core's waveform by default);
+// the SNES gets the bits through a virtual 4021 (as MiSTer's ioport.sv) unless the menu view is
+// up, the PIC through 0x2000/0x2001 (v2: always, as the stock core does; option: only while the
+// menu view is up, as v1).
+// Views: the game; the menu view (the PIC's screen at 0x1018_0000: its file browser or menu),
+// shown by itself before a game, while the PIC is active after a game started (v2 "follow": any
+// UI-loop or screen write within the last 600 ms) or toggled by L+R+SELECT+START (1 s); the
+// diagnostics status page and the log view (L+R+SELECT, 0.5 s, cycles off -> status -> log ->
+// off; the status page is shown by itself from the first file byte until the game starts).
+// While the menu view is up a new file from the PIC replaces the game. On the status page L+R+UP
+// / DOWN / LEFT (0.5 s) toggle the options: pad poll timing (stock / v1 fast), PIC pad registers
+// (always / gated) and follow (on / off). L+R+A (0.5 s): boot after a failed verify.
 //
 // Pins: board clock W16; HDMI transmitter video/audio and controller port 1 as quartus/snes;
 // the PIC32 link as quartus/hwtest; SDRAM command/address/DQ/clock as quartus/hwtest with AB10
@@ -35,7 +43,7 @@ module top #(
     parameter LOCK       = 1,
     parameter [15:0] RESET_CYCLES = 16'hffff, // core reset after the load (clk_sys cycles, ~3 ms)
     parameter AUD_FRAMING = 0,      // I2S, confirmed
-    parameter BSRAM_AW   = 13,      // BW-RAM / SRAM in block RAM: 8 KB
+    parameter BSRAM_AW   = 16,      // BW-RAM / SRAM in block RAM: 64 KB (v2; ARAM is in SDRAM)
     parameter TMPL_HEX   = "../../build/snes_load/diag.hex",
     parameter FONT_HEX   = "../../build/hwtest/font.hex",
     // simulation shortcuts (the real values are the defaults)
@@ -43,6 +51,8 @@ module top #(
     parameter integer DONE_MS = 250,
     parameter integer SHOW_MS = 4000,
     parameter integer COMBO_MS = 500,
+    parameter integer MENU_MS = 1000,       // L+R+SELECT+START
+    parameter integer FOLLOW_MS = 600,      // the PIC counts as active this long after a UI write
     parameter integer INIT_CYCLES = 21450
 ) (
     input  wire       clk,      // W16, 74.25 MHz
@@ -82,8 +92,11 @@ module top #(
     // ================================================================ controller port 1
     wire [31:0] pad_raw, pad_polls;
     wire        pad_std, pad_clk;
+    reg         opt_fast = 1'b0;                     // clk_vid: v1 pad timing
+    reg         opt_gate = 1'b0;                     // clk_vid: v1 PIC pad gating
+    reg         opt_follow = 1'b1;                   // clk_vid: show the PIC's screen when it is active
     pad_poll #(.START_US(PAD_START_US)) padp (
-        .clk(clk_vid), .p14(pad_p14), .j13k16(pad_clk), .t12(pad_t12), .raw(pad_raw),
+        .clk(clk_vid), .fast(opt_fast), .p14(pad_p14), .j13k16(pad_clk), .t12(pad_t12), .raw(pad_raw),
         .is_std(pad_std), .polls(pad_polls));
     assign pad_j13 = pad_clk;
     assign pad_k16 = pad_clk;
@@ -108,20 +121,26 @@ module top #(
     wire [7:0]  f_data;
     wire [10:0] scr_addr;
     wire [15:0] scr_q;
-    wire [3:0]  log_idx;
-    wire [103:0] log_q;
+    wire [8:0]  log_idx;
+    wire [136:0] log_q;
+    wire [26:0] log_newest;
+    wire [8:0]  log_a_n;
     wire [31:0] ms /* verilator public_flat_rd */, n_stat /* verilator public_flat_rd */;
     wire [31:0] n_ui /* verilator public_flat_rd */, n_padrd /* verilator public_flat_rd */;
     wire [31:0] n_wr, n_scr, last_ui_ms, link_addr, n_log /* verilator public_flat_rd */;
+    wire [31:0] n_rdall, last_txn_ms /* verilator public_flat_rd */, last_scr_ms, r21_ms;
+    wire [7:0]  r21;
+    wire [15:0] n_r21;
     link_ui #(.CLK_KHZ(107210)) lnk (
         .clk(clk_mem), .a(link_a), .n_rd(link_nrd), .n_wr(link_nwr), .d_in(link_d),
         .d_out(link_dout), .d_oe(link_oe),
         .pad(pad_m2[11:0]), .pad_std(pad_m2[12]), .pad_en(pic_pad_m[1]),
         .f_go(f_go), .f_addr(f_addr), .f_data(f_data),
         .clk_vid(clk_vid), .scr_addr(scr_addr), .scr_q(scr_q),
-        .log_idx(log_idx), .log_q(log_q), .n_log(n_log),
+        .log_idx(log_idx), .log_q(log_q), .n_log(n_log), .newest(log_newest), .log_a_n(log_a_n),
         .ms(ms), .n_stat(n_stat), .n_ui(n_ui), .n_padrd(n_padrd), .n_data(n_wr), .n_scr(n_scr),
-        .last_ui_ms(last_ui_ms), .addr(link_addr));
+        .last_ui_ms(last_ui_ms), .addr(link_addr), .n_rdall(n_rdall), .last_txn_ms(last_txn_ms),
+        .last_scr_ms(last_scr_ms), .r21(r21), .r21_ms(r21_ms), .n_r21(n_r21));
 
     // ================================================================ SDRAM
     wire [23:0] rom_addr;
@@ -138,6 +157,12 @@ module top #(
     wire [10:0] sd_rfmax /* verilator public_flat_rd */;
     wire [31:0] sd_reads /* verilator public_flat_rd */;
     wire        rom_en, ld_sa1;
+    wire [15:0] aram_addr;
+    wire [7:0]  aram_d, aram_q;
+    wire        aram_rd, aram_wr;
+    wire [31:0] n_ar_rd /* verilator public_flat_rd */, n_ar_wr /* verilator public_flat_rd */;
+    wire [15:0] n_ar_fwd, n_ar_late /* verilator public_flat_rd */, n_ar_drop /* verilator public_flat_rd */;
+    wire [15:0] n_clash /* verilator public_flat_rd */;
     reg         sys_tog = 1'b0;
     always @(posedge clk_sys) sys_tog <= ~sys_tog;
     assign sd_dq = sd_dq_oe ? sd_dq_out : 16'hzzzz;
@@ -159,7 +184,10 @@ module top #(
         .sd_we_n(sd_we_n), .sd_a(sd_a), .sd_ba(sd_ba), .sd_dq_in(sd_dq), .sd_dq_out(sd_dq_out),
         .sd_dq_oe(sd_dq_oe),
         .n_rf_forced(sd_forced), .n_rf_stall(sd_stall), .n_late(sd_late), .rf_max(sd_rfmax),
-        .n_reads(sd_reads));
+        .n_reads(sd_reads),
+        .ar_en(rom_en), .ar_addr(aram_addr), .ar_rd(aram_rd), .ar_wr(aram_wr), .ar_d(aram_d),
+        .ar_q(aram_q), .n_ar_rd(n_ar_rd), .n_ar_wr(n_ar_wr), .n_ar_fwd(n_ar_fwd),
+        .n_ar_late(n_ar_late), .n_ar_drop(n_ar_drop), .n_clash(n_clash));
 
     // ================================================================ loader
     wire [2:0]  ld_state /* verilator public_flat_rd */;
@@ -180,6 +208,8 @@ module top #(
     wire [1:0]  ld_kind /* verilator public_flat_rd */;
     wire [11:0] scores /* verilator public_flat_rd */;
     wire [15:0] hdr_compl;
+    wire        ram_keep /* verilator public_flat_rd */, ram_clear;
+    wire [31:0] last_game;
     reg         force_v = 1'b0;                      // clk_vid: L+R+A held
     reg         accept_v = 1'b0;                     // clk_vid: the file browser is shown
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
@@ -202,7 +232,8 @@ module top #(
         .n_loads(n_loads), .info_ok(info_ok), .info_size(info_size), .info_crc(info_crc),
         .info_type(info_type), .kind(ld_kind), .sa1(ld_sa1), .chip_unsup(ld_unsup),
         .scores(scores), .hdr_w0(hdr_w0), .hdr_w1(hdr_w1), .hdr_compl(hdr_compl),
-        .ok_info(ok_info), .ok_fly(ok_fly));
+        .ok_info(ok_info), .ok_fly(ok_fly),
+        .ram_keep(ram_keep), .ram_clear(ram_clear), .last_game(last_game), .aram_clr_done());
 
     // ================================================================ SNES
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
@@ -223,14 +254,19 @@ module top #(
     wire        dotclk, hde, vde, high_res, v224;
     wire [15:0] audio_l /* verilator public_flat_rd */, audio_r;
     wire        joy_strb, joy_clk, joy_d0;
-    snes_sdram_core #(.BSRAM_AW(BSRAM_AW)) snes (
+    (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+    reg [1:0]  clr_sync = 2'b00;
+    always @(posedge clk_sys) clr_sync <= {clr_sync[0], ram_clear};
+    snes_sdram_core #(.BSRAM_AW(BSRAM_AW), .ARAM_EXT(1)) snes (
         .clk_sys(clk_sys), .reset(core_reset), .rom_type(rom_type), .rom_mask(rom_mask),
         .ram_mask(ram_mask),
         .rom_addr(rom_addr), .rom_word(rom_word), .rom_q(rom_q), .rom_oe_n(rom_oe_n),
         .sysclkf_ce(sysclkf_ce), .sysclkr_ce(sysclkr_ce),
         .r(r), .g(g), .b(b), .dotclk(dotclk), .hde(hde), .vde(vde), .high_res(high_res),
         .v224(v224), .audio_l(audio_l), .audio_r(audio_r),
-        .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_d0(joy_d0));
+        .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_d0(joy_d0),
+        .ext_aram_addr(aram_addr), .ext_aram_d(aram_d), .ext_aram_rd(aram_rd), .ext_aram_wr(aram_wr),
+        .ext_aram_q(aram_q), .bsram_clr(clr_sync[1] & core_reset), .bsram_clr_done());
 
     // virtual controller (MiSTer ioport.sv): {B Y SELECT START UP DOWN LEFT RIGHT A X L R 0000},
     // latched on the strobe, shifted at the start of each clock pulse, 0 on the line = pressed
@@ -274,49 +310,69 @@ module top #(
     end
     localparam [2:0] S_IDLE = 0, S_LOAD = 1, S_PARSE = 2, S_VERIFY = 3, S_SHOW = 4, S_RUN = 5,
                      S_FAIL = 6, S_NOTROM = 7;
-    // combinations held for COMBO_MS (ms ticks at 74.25 MHz)
+    // the PIC is active: a UI-loop or screen write within FOLLOW_MS, after the boot (clk_mem)
+    reg  pic_act_m = 1'b0;
+    always @(posedge clk_mem)
+        pic_act_m <= rom_en && ((last_ui_ms > t_boot && ms - last_ui_ms < FOLLOW_MS) ||
+                                (last_scr_ms > t_boot && ms - last_scr_ms < FOLLOW_MS));
+    (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+    reg [1:0] pic_act_v = 2'b00;
+    always @(posedge clk_vid) pic_act_v <= {pic_act_v[0], pic_act_m};
+    wire follow_on = opt_follow && pic_act_v[1];
+
+    // button combinations, exact (no other button held), held for COMBO_MS / MENU_MS
     reg [16:0] mdiv = 17'd0;
     wire       ms_tick = mdiv == 17'd74249;
     always @(posedge clk_vid) mdiv <= ms_tick ? 17'd0 : mdiv + 17'd1;
-    wire c_diag = btn[10] && btn[11] && btn[2];    // L+R+SELECT
-    wire c_brow = btn[10] && btn[11] && btn[3];    // L+R+START
-    wire c_boot = btn[10] && btn[11] && btn[8];    // L+R+A
-    reg [9:0] hold = 10'd0;
-    reg [1:0] held = 2'd0;                          // 1 diag, 2 browser, 3 boot (acted on)
-    reg       diag_t = 1'b0, brow_t = 1'b0;
-    wire [1:0] combo = c_diag ? 2'd1 : c_brow ? 2'd2 : c_boot ? 2'd3 : 2'd0;
-    reg [1:0] combo_d = 2'd0;
+    localparam [11:0] B_SEL = 12'h004, B_START = 12'h008, B_UP = 12'h010, B_DOWN = 12'h020,
+                      B_LEFT = 12'h040, B_A = 12'h100, B_L = 12'h400, B_R = 12'h800;
+    localparam [11:0] LR = B_L | B_R;
+    wire [2:0] combo = btn == (LR | B_SEL)           ? 3'd1 :     // pages
+                       btn == (LR | B_SEL | B_START) ? 3'd2 :     // menu view
+                       btn == (LR | B_A)             ? 3'd3 :     // boot anyway
+                       btn == (LR | B_UP)            ? 3'd4 :     // option: poll timing
+                       btn == (LR | B_DOWN)          ? 3'd5 :     // option: PIC pad gating
+                       btn == (LR | B_LEFT)          ? 3'd6 : 3'd0;  // option: follow
+    reg [10:0] hold = 11'd0;
+    reg [2:0]  held = 3'd0;                         // the combination acted on (until released)
+    reg [2:0]  combo_d = 3'd0;
+    reg [1:0]  diag_v = 2'd0;                       // 0 off, 1 status page, 2 log view
+    reg        menu_t = 1'b0;                       // menu view by the keys
+    wire [10:0] need = combo == 3'd2 ? MENU_MS[10:0] : COMBO_MS[10:0];
     always @(posedge clk_vid) begin
         combo_d <= combo;
         force_v <= 1'b0;
-        if (combo == 2'd0 || combo != combo_d) begin
-            hold <= 10'd0;
-            if (combo == 2'd0) held <= 2'd0;
-        end else if (ms_tick && hold != COMBO_MS) begin
-            hold <= hold + 10'd1;
-        end else if (hold == COMBO_MS && held == 2'd0) begin
+        if (combo == 3'd0 || combo != combo_d) begin
+            hold <= 11'd0;
+            if (combo == 3'd0) held <= 3'd0;
+        end else if (ms_tick && hold < need) begin
+            hold <= hold + 11'd1;
+        end else if (hold >= need && held == 3'd0) begin
             held <= combo;
             case (combo)
-                2'd1: diag_t <= ~diag_t;
-                2'd2: brow_t <= ~brow_t;
+                3'd1: diag_v <= diag_v == 2'd2 ? 2'd0 : diag_v + 2'd1;
+                3'd2: menu_t <= ~menu_t;
+                3'd4: if (diag_v == 2'd1) opt_fast <= ~opt_fast;
+                3'd5: if (diag_v == 2'd1) opt_gate <= ~opt_gate;
+                3'd6: if (diag_v == 2'd1) opt_follow <= ~opt_follow;
                 default: ;
             endcase
         end
-        if (held == 2'd3) force_v <= 1'b1;
+        if (held == 3'd3) force_v <= 1'b1;
         st_prev <= st_v;
-        if (st_v != st_prev && (st_v == S_RUN || st_v == S_LOAD)) begin
-            diag_t <= 1'b0;
-            brow_t <= 1'b0;
-        end
+        if (st_v != st_prev && st_v == S_LOAD) menu_t <= 1'b0;
+        if (st_v != st_prev && st_v == S_RUN) begin menu_t <= 1'b0; diag_v <= 2'd0; end
     end
     wire forced = st_v == S_LOAD || st_v == S_PARSE || st_v == S_VERIFY || st_v == S_SHOW;
-    wire [1:0] mode /* verilator public_flat_rd */ = forced || diag_t ? 2'd2 :
-                      st_v == S_RUN ? (brow_t ? 2'd1 : 2'd0) :
-                      st_v == S_FAIL ? (brow_t ? 2'd1 : 2'd2) : 2'd1;
+    wire menu_up = st_v == S_RUN ? menu_t || follow_on : st_v == S_FAIL ? menu_t : 1'b1;
+    // 0 game, 1 menu (the PIC's screen), 2 status page, 3 log view
+    wire [1:0] mode /* verilator public_flat_rd */ = diag_v == 2'd2 ? 2'd3 :
+                      forced || diag_v == 2'd1 || (st_v == S_FAIL && !menu_t) ? 2'd2 :
+                      menu_up ? 2'd1 : 2'd0;
     always @(posedge clk_vid) begin
-        pic_pad_v  <= mode == 2'd1 || ((st_v == S_IDLE || st_v == S_NOTROM) && !forced);
-        snes_pad_v <= st_v == S_RUN && mode != 2'd1;
-        accept_v   <= mode == 2'd1;
+        pic_pad_v  <= !opt_gate || (menu_up && !forced) || st_v == S_IDLE || st_v == S_NOTROM;
+        snes_pad_v <= st_v == S_RUN && !menu_up;
+        accept_v   <= menu_up && st_v == S_RUN;
     end
 
     // ================================================================ video
@@ -333,6 +389,22 @@ module top #(
     // status words for the diagnostics page (diag.txt); clock crossings are display-only
     wire [31:0] st [0:55];
     wire [31:0] flags = {13'd0, pad_std, 10'd0, 8'd1 << ld_state};
+    // log view pages: 20 entries each, first the entries after the first file (0-383, in order),
+    // then the ring (384-511); the page advances every 150 frames (2.5 s)
+    reg  [5:0]  page = 6'd0;
+    reg  [7:0]  pframes = 8'd0;
+    wire [21:0] pa_m = {12'd0, {1'b0, log_a_n} + 10'd19} * 22'd3277;   // / 20 (exact below 1000)
+    wire [5:0]  pa = pa_m[21:16];                                       // ceil(a_n / 20)
+    wire [5:0]  npages = pa + 6'd7;
+    always @(posedge clk_vid) begin
+        if (mode != 2'd3) begin page <= 6'd0; pframes <= 8'd0; end
+        else if (cy == 10'd720 && cx == 11'd0) begin
+            if (pframes == 8'd149) begin
+                pframes <= 8'd0;
+                page <= page + 6'd1 >= npages ? 6'd0 : page + 6'd1;
+            end else pframes <= pframes + 8'd1;
+        end
+    end
     assign st[0]  = ms;
     assign st[1]  = flags;
     assign st[2]  = {8'h02, 8'h00, 6'd0, mode, 5'd0, ld_state};
@@ -371,8 +443,19 @@ module top #(
     assign st[35] = n_log;
     assign st[36] = snes_frames;
     assign st[37] = {n_big[15:0], n_ign[15:0]};
+    assign st[38] = n_ar_rd;
+    assign st[39] = n_ar_wr;
+    assign st[40] = {n_ar_fwd, n_ar_late};
+    assign st[41] = {n_ar_drop, n_clash};
+    assign st[42] = n_rdall;
+    assign st[43] = last_txn_ms;
+    assign st[44] = last_scr_ms;
+    assign st[45] = {r21, 8'd0, n_r21};
+    assign st[46] = r21_ms;
+    assign st[47] = last_game;
+    assign st[48] = {23'd0, log_a_n};
     genvar gi;
-    generate for (gi = 38; gi < 56; gi = gi + 1) begin : g_st0
+    generate for (gi = 49; gi < 56; gi = gi + 1) begin : g_st0
         assign st[gi] = 32'd0;
     end endgenerate
     wire [1791:0] stat;
@@ -380,26 +463,41 @@ module top #(
         assign stat[32*gi +: 32] = st[gi];
     end endgenerate
 
-    // log rows 16-21 = entries 0-5 (newest first): words 56 address, 57 count, 58 {kind, D0},
-    // 59 repeats, 60 time, 61 row number
-    localparam [4:0] LOG_ROW0 = 5'd16;
+    // log rows: status page rows 20-21 = the 2 newest entries; log view rows 2-21 = page entries.
+    // Words 56 address, 57 {seq, count}, 58 {kind at bit 24, first byte}, 59 repeats,
+    // 60 t_first, 61 t_last, 62 entry index.
+    localparam integer LOG_T0 = 18;
     wire [4:0] row_next;
-    wire [4:0] lrow = row_next - LOG_ROW0;
-    assign log_idx = lrow[3:0];
-    wire [255:0] rowstat = {64'd0, {28'd0, lrow[3:0]}, {10'd0, log_q[85:64]}, {16'd0, log_q[103:88]},
-                            {log_q[63:56], 22'd0, log_q[87:86]}, {8'd0, log_q[55:32]},
-                            log_q[31:0]};
+    wire [4:0] lrow = row_next - 5'd2;
+    wire [9:0] pbase = page < pa ? {4'd0, page} * 10'd20 : 10'd384 + {4'd0, page - pa} * 10'd20;
+    wire [9:0] lidx = pbase + {5'd0, lrow};
+    wire       lblank = mode == 2'd3 ? (row_next < 5'd2 || (page < pa ? lidx >= {1'b0, log_a_n} : lidx > 10'd511)) :
+                        (row_next < 5'd20 || n_log < (row_next == 5'd20 ? 32'd1 : 32'd2));
+    assign log_idx = mode == 2'd3 ? lidx[8:0] : row_next == 5'd20 ? log_newest[8:0] : log_newest[17:9];
+    reg        lblank_q = 1'b0;
+    reg  [8:0] lidx_q = 9'd0;
+    always @(posedge clk_vid) begin lblank_q <= lblank; lidx_q <= log_idx; end
+    wire [255:0] rowstat = lblank_q ? 256'd0 :
+        {32'd0, {23'd0, lidx_q}, {8'd0, log_q[103:80]}, {8'd0, log_q[79:56]}, {16'd0, log_q[119:104]},
+         {7'd0, log_q[136], 16'd0, log_q[55:48]}, {log_q[135:120], log_q[47:32]}, log_q[31:0]};
 
     // external cells: strings by row (positions from diag.txt, see notes/snes-load.md)
     wire [4:0] ext_row;
     wire [6:0] ext_col;
     reg  [7:0] ext_s = 8'h20;
     reg        ext_t = 1'b0;
-    assign txt_addr = ext_row == 5'd6 ? {2'd3, ext_col[4:0] - 5'd12} : {ld_kind, ext_col[4:0] - 5'd8};
+    assign txt_addr = ext_row == 5'd7 ? {2'd3, ext_col[4:0] - 5'd12} : {ld_kind, ext_col[4:0] - 5'd8};
     function [7:0] ch(input [8*24-1:0] s, input [6:0] i);       // character i of a 24-char string
         ch = i < 7'd24 ? s[8*(23 - i) +: 8] : 8'h20;
     endfunction
+    function [7:0] chn(input [8*70-1:0] s, input [6:0] i);      // character i of a 70-char string
+        chn = i < 7'd70 ? s[8*(69 - i) +: 8] : 8'h20;
+    endfunction
+    function [7:0] hexc(input [3:0] v);
+        hexc = v < 4'd10 ? 8'h30 + {4'd0, v} : 8'h37 + {4'd0, v};
+    endfunction
     reg [8*24-1:0] s_state, s_map, s_ver;
+    reg [8*70-1:0] s_opt, s_ram;
     always @(*) begin
         case (ld_state)
             S_IDLE:   s_state = "waiting (file browser)  ";
@@ -427,14 +525,31 @@ module top #(
             s_ver = "= TRANSFER CRC: OK      ";
         else
             s_ver = "MISMATCH                ";
+        s_opt = {opt_fast ? "UP poll FAST (v1) " : "UP poll STOCK     ",
+                 opt_gate ? "DOWN pad GATED (v1) " : "DOWN pad ALWAYS     ",
+                 opt_follow ? "LEFT follow ON   " : "LEFT follow OFF  ",
+                 st_v != S_RUN ? "               " : !menu_up ? "view GAME      " :
+                 menu_t ? "view MENU(keys)" : "view MENU(PIC) "};
+        s_ram = {ram_mask == 24'd0 ? "none (header RAM size 0)                " :
+                 ld_state < S_SHOW || ld_state == S_NOTROM ? "64 KB block RAM                         " :
+                 ram_keep ? "64 KB: KEPT (same game as last boot)    " :
+                            "64 KB: CLEARED (another game)           ", 240'd0};
     end
     always @(posedge clk_vid) begin
-        ext_t <= ext_row == 5'd6 || ext_row == 5'd7;
+        ext_t <= ext_row == 5'd7 || ext_row == 5'd8;
         case (ext_row)
-            5'd0:    ext_s <= ch(s_state, ext_col - 7'd47);
-            5'd5:    ext_s <= ch(info_ok ? "SNTROM01 ok             " : "no info block           ", ext_col - 7'd7);
-            5'd9:    ext_s <= ld_state >= S_VERIFY && ld_state != S_NOTROM ? ch(s_map, ext_col - 7'd7) : 8'h20;
-            5'd10:   ext_s <= ch(s_ver, ext_col - 7'd35);
+            5'd0:    ext_s <= ch(s_state, ext_col - 7'd50);
+            5'd6:    ext_s <= ch(info_ok ? "SNTROM01 ok             " : "no info block           ", ext_col - 7'd7);
+            5'd10:   ext_s <= ld_state >= S_VERIFY && ld_state != S_NOTROM ? ch(s_map, ext_col - 7'd7) : 8'h20;
+            5'd11:   ext_s <= ch(s_ver, ext_col - 7'd35);
+            5'd15:   ext_s <= chn(s_ram, ext_col - 7'd16);
+            5'd16:   ext_s <= chn(s_opt, ext_col - 7'd9);
+            5'd18:   ext_s <= ext_col < 7'd60 ?
+                         ch(mode == 2'd3 ? "20 per page, auto paging" : "2 newest below          ", ext_col - 7'd14) :
+                         mode != 2'd3 ? 8'h20 :
+                         ext_col == 7'd67 ? "p" : ext_col == 7'd68 ? "g" : ext_col == 7'd70 ? hexc(page[5:4]) :
+                         ext_col == 7'd71 ? hexc(page[3:0]) : ext_col == 7'd72 ? "/" :
+                         ext_col == 7'd73 ? hexc(npages[5:4]) : ext_col == 7'd74 ? hexc(npages[3:0]) : 8'h20;
             default: ext_s <= ch(pad_std ? "std pad                 " : "no pad                  ", ext_col - 7'd54);
         endcase
     end
@@ -442,7 +557,7 @@ module top #(
 
     wire [7:0] or_, og, ob;
     wire       ovalid;
-    overlay #(.TMPL_HEX(TMPL_HEX), .FONT_HEX(FONT_HEX), .FLAG_WORD(1)) ovl (
+    overlay #(.TMPL_HEX(TMPL_HEX), .FONT_HEX(FONT_HEX), .FLAG_WORD(1), .LOG_T0(LOG_T0)) ovl (
         .clk(clk_vid), .hx(cx), .vy(cy), .mode(mode), .stat(stat), .rowstat(rowstat),
         .row_next(row_next), .scr_addr(scr_addr), .scr_q(scr_q), .ext_row(ext_row),
         .ext_col(ext_col), .ext_q(ext_q), .r(or_), .g(og), .b(ob), .valid(ovalid));

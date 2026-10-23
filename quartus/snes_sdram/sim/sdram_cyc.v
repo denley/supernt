@@ -11,7 +11,8 @@
 // estimates of notes/snes-sdram.md (window ~3.3-4.1 cycles after the READ at 85.77 MHz) that is
 // wlo = 7, whi = 8 (fall 3.5 and rise 4). wlo/whi are registers the testbench may change
 // (TB_WIN) to move the window against the controller's fixed capture point.
-// Full-page bursts run on until any other command (PRECHARGE/BST/READ/WRITE): the burst word
+// Full-page bursts run on until PRECHARGE of their bank, BST or another READ/WRITE (ACT doesn't
+// end them; a WRITE while read data is due is an error): the burst word
 // taken at the command's edge is the last one not produced, as in the datasheet (read: last
 // word at PRE + CL - 1; write: no data written at the BST/PRE edge). Writes store whatever is
 // on the bus (0xBAD0 when the FPGA isn't driving).
@@ -95,7 +96,11 @@ module sdram_cyc #(
         hc = hc + 1;
         if (!clk) begin                                     // ---- chip clock edge
             ce = ce + 1;
-            if (c != 4'b0111 && !cs_n) begin rd_on = 1'b0; wr_on = 1'b0; end   // burst ends
+            // burst ends: READ/WRITE (any bank), BST, PRE of its bank (ACT/REF don't end it)
+            if (!cs_n && (c[2:0] == 3'b101 || c[2:0] == 3'b100 || c[2:0] == 3'b110 ||
+                          (c[2:0] == 3'b010 && (a[10] || ba == bb)))) begin
+                rd_on = 1'b0; wr_on = 1'b0;
+            end
             if (wr_on) begin
                 mem[mi(bb, row[bb], bc)] = oe_fpga ? dq_fpga : 16'hBAD0;
                 t_wd[bb] = ce; bc = (bc + 10'd1) & CMASK; n_wr = n_wr + 1;
@@ -127,6 +132,11 @@ module sdram_cyc #(
                         produce(rd_h0, 0, mem[mi(ba, row[ba], bc)]);
                         bc = (bc + 10'd1) & CMASK; n_rd = n_rd + 1;
                     end else begin
+                        for (k = 2; k < 24; k = k + 1)
+                            if (rval[(hc + k) & 63]) begin
+                                err("WRITE while read data is due");
+                                rval[(hc + k) & 63] = 1'b0;
+                            end
                         wr_on = 1'b1;
                         mem[mi(ba, row[ba], bc)] = oe_fpga ? dq_fpga : 16'hBAD0;
                         t_wd[ba] = ce; bc = (bc + 10'd1) & CMASK; n_wr = n_wr + 1;

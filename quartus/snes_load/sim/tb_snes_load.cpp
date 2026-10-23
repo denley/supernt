@@ -16,16 +16,24 @@
 //   UI loop    every 8 ms: 01 -> 0x1000_D120, read 0x2000/0x2001 twice each; DOWN (pad bit 5)
 //              moves the cursor and redraws the 4 KB screen, RUN (bit 1, "Y") on a file sends
 //              it: link address 0xFF00 + offset, runs of 0x3000 bytes, 150 ns /WR pulses (3.3
-//              MB/s in a run) with gaps for 1.7 MB/s on average (TB_FAST=1: no gaps); after the
-//              file a few writes to 0x1000_D110/D114 (stand-ins for whatever the PIC does
-//              then) and the UI loop goes on.
-// The "user" (pad): DOWN at 30-60 ms, RUN (Y) at 75-105 ms, after the game started: L+R+SELECT
-// for 30 ms twice (diagnostics page on and off; the PIC must read no buttons meanwhile).
-// 180 ms after the boot the PIC sends the file again by itself (as an auto-advancing player
-// might): the core must ignore it (the browser isn't open) and the game must go on.
+//              MB/s in a run) with gaps for 1.7 MB/s on average (TB_FAST=1: no gaps);
+//   after it   what the console's PIC did after a file (hardware-tests.md, 23 Oct): 8 bytes at
+//              0x1018_0F6C, 0x1000_D129 = 00, 0x0000_00FE = 06, 0x1000_0102 = 00, 0x1000_0010 =
+//              00, 20 ms later 0x1000_0021 = F8, one more UI loop, then nothing on the link;
+//   playing    the PIC watches the controller lines itself (the v2 hypothesis: the Super Nt's
+//              menu combination DOWN+SELECT, decoded from LATCH/CLOCK/DATA as the core polls the
+//              pad); two polls in a row with DOWN+SELECT wake it: it redraws its browser screen
+//              and runs the UI loop again, so a second file can be picked.
+// The "user" (pad), times after the first boot: L+R+SELECT+START at +40 and +120 ms (menu view
+// on, off: the PIC stays silent), L+R+SELECT at +200, +260, +320 (status page, log view, off),
+// DOWN+SELECT at +380 (the PIC wakes, the core follows it to the menu view), DOWN at +480 (the
+// second file), Y at +530: the second file (TB_FILE2, default the same ROM under another name:
+// save RAM kept) is loaded and booted; the SA-1 tests must pass again.
 //
 // Usage: tb_snes_load <frames> <out-prefix> [file.spc]  (default build/snes_load/sa1test.spc)
-// Environment: TB_FAST=1 (no gaps between runs), TB_GAME=1 (any ROM: don't check the SA-1
+// Environment: TB_FAST=1 (no gaps between runs), TB_PULSE=ns (strobe phases, default 150),
+// TB_NOMENU=1 (v1 flow: the PIC's UI loop goes on after the file), TB_QUIET=1 (the v2 PIC, no
+// presses after the boot: for running games), TB_FILE2=file.spc, TB_GAME=1 (any ROM: don't check the SA-1
 // test results, check the mapper against TB_TYPE/TB_MASK hex), TB_WIN=lo,hi (the SDRAM model's
 // read window, default 8,8), TB_DEBUG=1.
 // Exit status 0 = PASS (last line).
@@ -113,6 +121,9 @@ int main(int argc, char **argv) {
     const int nframes = argc > 1 ? atoi(argv[1]) : 22;
     const std::string prefix = argc > 2 ? argv[2] : "frame";
     const std::string fname = argc > 3 ? argv[3] : "build/snes_load/sa1test.spc";
+    const std::string fname2 = getenv("TB_FILE2") ? getenv("TB_FILE2") : fname;
+    const bool scen = getenv("TB_NOMENU") == nullptr;      // the v2 menu scenario
+    const bool quiet = getenv("TB_QUIET") != nullptr;      // v2 PIC, but no presses after the boot
     const bool fast = getenv("TB_FAST") != nullptr, game = getenv("TB_GAME") != nullptr;
     std::vector<uint8_t> file;
     {
@@ -121,6 +132,15 @@ int main(int argc, char **argv) {
         uint8_t buf[65536];
         size_t n;
         while ((n = fread(buf, 1, sizeof buf, f)) > 0) file.insert(file.end(), buf, buf + n);
+        fclose(f);
+    }
+    std::vector<uint8_t> file2;
+    {
+        FILE *f = fopen(fname2.c_str(), "rb");
+        if (!f) { perror(fname2.c_str()); return 1; }
+        uint8_t buf[65536];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof buf, f)) > 0) file2.insert(file2.end(), buf, buf + n);
         fclose(f);
     }
     const uint32_t info_size = file[0x10188] | file[0x10189] << 8 | file[0x1018A] << 16 | (uint32_t)file[0x1018B] << 24;
@@ -145,7 +165,7 @@ int main(int argc, char **argv) {
     std::string shown;
     for (char c : base) shown += toupper(c);
     // file list as the browser shows it (upper case, sorted case-sensitively: our files first)
-    std::vector<std::string> files = {shown, "SPC README.TXT", "SUPER NT TEST CHORD.SPC",
+    std::vector<std::string> files = {shown, "Z SECOND " + shown, "SPC README.TXT", "SUPER NT TEST CHORD.SPC",
                                       "SPC2_FILE_SPECIFICATION_V1.TXT"};
     int cursor = 0;      // 0 = GO BACK, k = files[k - 1]
     auto screen = [&](std::vector<uint8_t> &s) {
@@ -170,12 +190,16 @@ int main(int argc, char **argv) {
 
     // ---------------------------------------------------------------- the PIC's script
     Pic pic;
+    if (const char *pp = getenv("TB_PULSE")) pic.pulse = atof(pp);   // strobe phase (ns)
     double now_ns = 0;
     int polls = 0, poll_ok_at = -1, ui_loops = 0, ui_after_boot = 0, presses_down = 0, runs = 0;
     int pad_nonzero_in_game = 0, pad_reads_in_game = 0;
     double t_file0 = -1, t_file1 = -1;
     uint8_t s0b = 0, s1b = 0, pad_prev = 0, pad_now = 0;
     bool sending = false, sent = false, booted = false, resent = false;
+    bool playing = false, woke = false, sent2 = false, skip_edge = false;
+    int nfile = 0, wake_polls = 0;
+    double t_boot1 = -1;
     std::function<void()> ui_loop, poll;
     std::vector<uint8_t> scr;
     auto send_screen = [&]() { screen(scr); pic.block(0x10180000, scr.data(), scr.size()); };
@@ -199,17 +223,41 @@ int main(int argc, char **argv) {
     };
     auto send_file = [&]() {
         sending = true;
+        const std::vector<uint8_t> &fl = nfile == 0 ? file : file2;
+        nfile++;
         t_file0 = now_ns;
-        for (size_t off = 0; off < file.size(); off += 0x3000) {
-            size_t n = std::min<size_t>(0x3000, file.size() - off);
-            pic.block(0xFF00 + off, file.data() + off, n);
+        for (size_t off = 0; off < fl.size(); off += 0x3000) {
+            size_t n = std::min<size_t>(0x3000, fl.size() - off);
+            pic.block(0xFF00 + off, fl.data() + off, n);
             if (!fast) pic.wait(n * 1e9 / 1.7e6 - n * 2 * pic.pulse);   // 1.7 MB/s on average
         }
         pic.call([&]() {
             sending = false; sent = true; t_file1 = now_ns;
-            for (int i = 4; i >= 0; i--) { pic.byte(0x1000D110, i); pic.byte(0x1000D114, 2 * i); }
-            pic.call(ui_loop);
+            if (!scen) {
+                for (int i = 4; i >= 0; i--) { pic.byte(0x1000D110, i); pic.byte(0x1000D114, 2 * i); }
+                pic.call(ui_loop);
+                return;
+            }
+            // as the console's PIC did after a file, then silence
+            uint8_t sp[8] = {0x20, 0, 0x20, 0, 0x20, 0, 0x20, 0};
+            pic.block(0x10180F6C, sp, 8);
+            pic.byte(0x1000D129, 0x00);
+            pic.byte(0x000000FE, 0x06);
+            pic.byte(0x10000102, 0x00);
+            pic.byte(0x10000010, 0x00);
+            pic.wait(20e6);
+            pic.byte(0x10000021, 0xF8);
+            pic.byte(0x1000D120, 0x01);
+            pic.read(0x20000000, 2, [&](uint8_t v) { (void)v; });
+            pic.read(0x20010000, 2, [&](uint8_t v) { (void)v; });
+            pic.call([&]() { playing = true; wake_polls = 0; });
         });
+    };
+    auto wake = [&]() {                     // DOWN+SELECT seen on the controller lines
+        playing = false; woke = true; sent = false;
+        skip_edge = true;                   // buttons held while it wakes aren't new presses
+        send_screen();
+        pic.call(ui_loop);
     };
     ui_loop = [&]() {
         pic.byte(0x1000D120, 0x01);
@@ -224,15 +272,21 @@ int main(int argc, char **argv) {
                 pad_reads_in_game++;
                 if (pad_now) pad_nonzero_in_game++;
             }
-            uint8_t pressed = pad_now & ~pad_prev;
+            uint8_t pressed = skip_edge ? 0 : pad_now & ~pad_prev;
+            skip_edge = false;
             pad_prev = pad_now;
-            if (booted && !resent && now_ns / 1e6 > r->tb__DOT__dut__DOT__t_boot + 180.0) {
+            if (!scen && booted && !resent && now_ns / 1e6 > r->tb__DOT__dut__DOT__t_boot + 180.0) {
                 resent = true;
                 send_file();
                 return;
             }
             if (pressed & 0x20 && !sent && cursor < (int)files.size()) { cursor++; presses_down++; send_screen(); }
-            if (pressed & 0x02 && cursor == 1 && !sent && !sending) { runs++; send_file(); return; }
+            if (pressed & 0x02 && (cursor == 1 || (cursor == 2 && woke)) && !sent && !sending) {
+                runs++;
+                if (woke) sent2 = true;
+                send_file();
+                return;
+            }
             pic.wait(8e6);
             pic.call(ui_loop);
         });
@@ -257,11 +311,26 @@ int main(int argc, char **argv) {
         uint16_t b = 0;
         if (ms >= 30 && ms < 60) b |= 1 << 5;                         // DOWN
         if (ms >= 75 && ms < 105) b |= 1 << 1;                        // Y = RUN
-        const double tb0 = r->tb__DOT__dut__DOT__t_boot;              // ms (the core's clock)
-        if (booted && ((ms >= tb0 + 60 && ms < tb0 + 90) || (ms >= tb0 + 130 && ms < tb0 + 160)))
-            b |= 1 << 10 | 1 << 11 | 1 << 2;                          // L+R+SELECT
+        if (!booted || quiet) return b;
+        const double tb0 = t_boot1;                                    // ms (the core's clock)
+        const double t = ms - tb0;
+        const uint16_t L = 1 << 10, R = 1 << 11, SEL = 1 << 2, START = 1 << 3, DN = 1 << 5, Y = 1 << 1;
+        if (!scen) {
+            if ((t >= 60 && t < 90) || (t >= 130 && t < 160)) b |= L | R | SEL;
+            return b;
+        }
+        // (the pad is polled every 16 ms: a combination must be held >= 20 ms + one poll)
+        if ((t >= 40 && t < 100) || (t >= 120 && t < 180)) b |= L | R | SEL | START;  // menu on, off
+        if ((t >= 200 && t < 240) || (t >= 260 && t < 300) || (t >= 320 && t < 360))
+            b |= L | R | SEL;                                          // status, log, off
+        if (t >= 380 && t < 430) b |= DN | SEL;                        // the Super Nt menu combination
+        if (t >= 480 && t < 500) b |= DN;                              // second file
+        if (t >= 530 && t < 550) b |= Y;                               // RUN
         return b;
     };
+    // the PIC's view of the controller lines while "playing": bits sampled as CLOCK falls
+    int sn_idx = 0, sn_prev_clk = 1, sn_prev_latch = 0;
+    uint32_t sn_bits = 0;
 
     // ---------------------------------------------------------------- clocks and frames
     const double h74 = 1e6 / 74.25 / 2, hsys = 1e6 / 21.44196 / 2, hmem = hsys / 5;   // ps (clk_mem = 5 x)
@@ -277,7 +346,9 @@ int main(int argc, char **argv) {
     int frame = -1, line = -1, x = 0, lines_total = 0, conflicts = 0;
     bool ok_lock = true, ok_ring = true, ok_pix = false, ok_wram = false, ok_browser = false,
          ok_cursor = false, ok_diag = false;
-    int boot_frame = -1, diag_frames = 0;
+    int boot_frame = -1, diag_frames = 0, boot2_frame = -1;
+    bool wram_cleared = false;
+    bool booted2 = false, seen_menu_keys = false, seen_status = false, seen_log = false, seen_follow = false;
     int prev_vs = 0, prev_hs = 0, prev_de = 0;
     auto &wram = r->tb__DOT__dut__DOT__snes__DOT__wram__DOT__mem;
     auto px = [&](int yy, int xx) -> uint32_t { const unsigned char *p = &img[(yy * W + xx) * 3]; return p[0] << 16 | p[1] << 8 | p[2]; };
@@ -291,7 +362,7 @@ int main(int argc, char **argv) {
             fprintf(f, "P6\n%d %d\n255\n", W, H);
             fwrite(img.data(), 1, img.size(), f);
             fclose(f);
-            const char *mname[] = {"game", "browser", "diagnostics", "?"};
+            const char *mname[] = {"game", "menu", "status", "log"};
             printf("frame %2d (%6.1f ms): %3d lines, view %s, loader state %d, file bytes %u, SNES %s,"
                    " WRAM done=%02x results:", frame, now_ns / 1e6, lines_total, mname[mode_seen & 3],
                    r->tb__DOT__dut__DOT__ld_state, r->tb__DOT__dut__DOT__n_file,
@@ -313,7 +384,7 @@ int main(int argc, char **argv) {
                 ok_lock &= lines_total == 750;
                 ok_ring &= conflicts == 0;
             }
-            if (boot_frame >= 0 && mode_seen == 0) {
+            if (boot_frame >= 0 && mode_seen == 0 && (!scen || !sent2 || booted2)) {
                 ok_wram = wram[0xfe] == 0xa5 && wram[0xff] > 0;
                 for (int k = 0; k < wram[0xff]; k++) ok_wram &= wram[0x100 + k] == 1;
                 const unsigned char *p = &img[(96 * W + 640) * 3];
@@ -345,7 +416,37 @@ int main(int argc, char **argv) {
             else if (pclk_ && !prev_clk) pad_idx++;
             prev_clk = pclk_; prev_latch = latch;
             tb->pad_t12 = pad_idx < 12 ? !(bt >> pad_idx & 1) : pad_idx < 16 ? 1 : 0;
-            if (!booted && !r->tb__DOT__dut__DOT__core_reset) { booted = true; boot_frame = frame; }
+            // snooper (the PIC watching the lines): sample DATA as CLOCK falls, decide after 16
+            if (latch && !sn_prev_latch) { sn_idx = 0; sn_bits = 0; }
+            if (!latch && !pclk_ && sn_prev_clk) {
+                if (sn_idx < 16 && !tb->pad_t12) sn_bits |= 1u << sn_idx;
+                sn_idx++;
+                if (sn_idx == 16 && playing) {
+                    if ((sn_bits & 0x24) == 0x24) { if (++wake_polls >= 2) wake(); }
+                    else wake_polls = 0;
+                }
+            }
+            sn_prev_clk = pclk_; sn_prev_latch = latch;
+            if (!booted && !r->tb__DOT__dut__DOT__core_reset) {
+                booted = true; boot_frame = frame; t_boot1 = r->tb__DOT__dut__DOT__t_boot;
+            }
+            if (sent2 && !wram_cleared && r->tb__DOT__dut__DOT__ld_state == 1) {
+                wram_cleared = true;                   // the second run must write its results anew
+                wram[0xfe] = 0; wram[0xff] = 0;
+                for (int k = 0; k < 7; k++) wram[0x100 + k] = 0;
+            }
+            if (booted && sent2 && !booted2 && r->tb__DOT__dut__DOT__ld_state == 5 &&
+                !r->tb__DOT__dut__DOT__core_reset && r->tb__DOT__dut__DOT__t_boot != (unsigned)t_boot1) {
+                booted2 = true; boot2_frame = frame;
+            }
+            {
+                int m = r->tb__DOT__dut__DOT__mode;
+                if (booted && !woke && m == 1) seen_menu_keys = true;
+                if (booted && !woke && m == 2 && r->tb__DOT__dut__DOT__ld_state == 5) seen_status = true;
+                if (booted && !woke && m == 3) seen_log = true;
+                if (woke && m == 1 && !sent2) seen_follow = true;
+                if (booted && !woke && m == 1 && pic.q.size() > 0 && !playing) ;
+            }
             // video
             int hs = tb->s0, vs = tb->s1, de = tb->s2;
             if (vs && !prev_vs) finish_frame();
@@ -398,13 +499,29 @@ int main(int argc, char **argv) {
            r->tb__DOT__dut__DOT__ram_mask, t_file0 / 1e6, t_file1 / 1e6,
            file.size() / ((t_file1 - t_file0) / 1e9) / 1e6, r->tb__DOT__dut__DOT__t_start,
            r->tb__DOT__dut__DOT__t_end, r->tb__DOT__dut__DOT__t_boot, r->tb__DOT__dut__DOT__n_log);
-    bool ok_link = poll_ok_at == 1 && presses_down == 1 && runs == 1 && ui_after_boot > 0 &&
-                   pad_nonzero_in_game == 0;
-    // the second transfer (while the game ran) ignored: every byte counted, no reload
-    bool ok_guard = game || (resent && r->tb__DOT__dut__DOT__n_ign == file.size());
-    printf("second transfer while the game ran: %s, %u bytes ignored\n", resent ? "sent" : "NOT SENT",
-           r->tb__DOT__dut__DOT__n_ign);
-    ok_link &= ok_guard;
+    bool ok_link = poll_ok_at == 1 && presses_down >= 1 && runs >= 1;
+    if (!scen) {
+        ok_link &= presses_down == 1 && runs == 1 && ui_after_boot > 0 && pad_nonzero_in_game == 0;
+        bool ok_guard = game || (resent && r->tb__DOT__dut__DOT__n_ign == file.size());
+        printf("second transfer while the game ran: %s, %u bytes ignored\n", resent ? "sent" : "NOT SENT",
+               r->tb__DOT__dut__DOT__n_ign);
+        ok_link &= ok_guard;
+    }
+    bool ok_menu = true;
+    if (scen && !quiet) {
+        ok_menu = seen_menu_keys && seen_status && seen_log && woke && seen_follow && sent2 && booted2 &&
+                  r->tb__DOT__dut__DOT__ram_keep == (fname2 == fname) && r->tb__DOT__dut__DOT__n_log > 0;
+        printf("menu scenario: menu view by keys %s, status page %s, log view %s, PIC woke on DOWN+SELECT %s,"
+               " core followed it %s, second file %s, second boot %s (frame %d), save RAM %s\n",
+               seen_menu_keys ? "ok" : "NO", seen_status ? "ok" : "NO", seen_log ? "ok" : "NO",
+               woke ? "yes" : "NO", seen_follow ? "ok" : "NO", sent2 ? "sent" : "NOT SENT",
+               booted2 ? "ok" : "NO", boot2_frame, r->tb__DOT__dut__DOT__ram_keep ? "kept" : "cleared");
+    }
+    printf("ARAM port: %u reads, %u writes, %u late, %u dropped, %u command clashes\n",
+           r->tb__DOT__dut__DOT__n_ar_rd, r->tb__DOT__dut__DOT__n_ar_wr, (unsigned)r->tb__DOT__dut__DOT__n_ar_late,
+           (unsigned)r->tb__DOT__dut__DOT__n_ar_drop, (unsigned)r->tb__DOT__dut__DOT__n_clash);
+    bool ok_aram = r->tb__DOT__dut__DOT__n_ar_rd > 0 && r->tb__DOT__dut__DOT__n_ar_drop == 0 &&
+                   r->tb__DOT__dut__DOT__n_clash == 0 && r->tb__DOT__dut__DOT__n_ar_late == 0;
     bool ok_load = st == 5 && r->tb__DOT__dut__DOT__ok_info && r->tb__DOT__dut__DOT__crc_sd == info_crc &&
                    r->tb__DOT__dut__DOT__crc_file == crc32(file.data(), file.size()) &&
                    r->tb__DOT__dut__DOT__n_order == 0 && r->tb__DOT__dut__DOT__n_drop == 0;
@@ -414,11 +531,12 @@ int main(int argc, char **argv) {
     ok_diag = diag_frames > 0;
     bool ok_sd = r->tb__DOT__sdram__DOT__errors == 0 && r->tb__DOT__dut__DOT__sd_late == 0 &&
                  r->tb__DOT__dut__DOT__sd_stall == 0 && r->tb__DOT__sdram__DOT__max_ref_gap <= 1673;
-    bool ok = ok_link && ok_browser && ok_cursor && ok_load && ok_map && ok_sd &&
+    bool ok = ok_link && ok_browser && ok_cursor && ok_load && ok_map && ok_sd && ok_menu && ok_aram &&
               (game || (ok_wram && ok_pix && ok_lock && ok_ring && ok_diag));
-    printf("%s: link %s, browser %s, cursor %s, load+verify %s, mapper %s, SDRAM %s", ok ? "PASS" : "FAIL",
-           ok_link ? "ok" : "BAD", ok_browser ? "ok" : "BAD", ok_cursor ? "ok" : "BAD", ok_load ? "ok" : "BAD",
-           ok_map ? "ok" : "BAD", ok_sd ? "ok" : "BAD");
+    printf("%s: link %s, browser %s, cursor %s, load+verify %s, mapper %s, SDRAM %s, ARAM %s, menu %s",
+           ok ? "PASS" : "FAIL", ok_link ? "ok" : "BAD", ok_browser ? "ok" : "BAD", ok_cursor ? "ok" : "BAD",
+           ok_load ? "ok" : "BAD", ok_map ? "ok" : "BAD", ok_sd ? "ok" : "BAD", ok_aram ? "ok" : "BAD",
+           ok_menu ? "ok" : "BAD");
     if (!game)
         printf(", SA-1 tests %s, summary band %s, frame lock %s, line buffer %s, diagnostics over the game %s",
                ok_wram ? "all pass" : "BAD", ok_pix ? "green" : "NOT green", ok_lock ? "ok" : "BAD",

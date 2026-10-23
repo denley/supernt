@@ -5,7 +5,8 @@
 // the x8 SDRAM pair replaced by the cycle-based model (quartus/snes_sdram/sim/sdram_cyc.v) with
 // chip B's 512-column pages (clk_mem = 5 x clk_sys). Fixed sync order 0: s0/s1/s2 = HS/VS/DE.
 // Shortened waits:
-// pad poll from 2 ms, diagnostics shown 30 ms before the boot, 20 ms button combinations,
+// pad poll from 2 ms, diagnostics shown 30 ms before the boot, 20 ms button combinations (menu
+// combination 40 ms), the PIC counts as active for 60 ms after a UI write,
 // 256-cycle SNES reset, 200-cycle SDRAM power-up wait.
 module tb #(parameter CAPTURE_HALF = 8, parameter TMPL_HEX = "diag.hex",
             parameter FONT_HEX = "font.hex") (
@@ -37,7 +38,8 @@ module tb #(parameter CAPTURE_HALF = 8, parameter TMPL_HEX = "diag.hex",
     assign link_oe = dut.link_oe;
     top #(.SYNC_ORDER(0), .RESET_CYCLES(16'd256), .CAPTURE_HALF(CAPTURE_HALF),
           .TMPL_HEX(TMPL_HEX), .FONT_HEX(FONT_HEX),
-          .PAD_START_US(2000), .SHOW_MS(30), .COMBO_MS(20), .INIT_CYCLES(250)) dut (
+          .PAD_START_US(2000), .SHOW_MS(30), .COMBO_MS(20), .MENU_MS(40), .FOLLOW_MS(60),
+          .INIT_CYCLES(250)) dut (
         .clk(clk), .pclk(pclk), .s0(s0), .s1(s1), .s2(s2), .ch1(ch1), .ch2(ch2), .ch3(ch3),
         .aud_mclk(), .aud_bclk(), .aud_lrclk(), .aud_sdata(),
         .pad_p14(pad_p14), .pad_j13(pad_j13), .pad_k16(), .pad_t12(pad_t12),

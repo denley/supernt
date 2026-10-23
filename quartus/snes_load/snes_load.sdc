@@ -90,9 +90,15 @@ if {$m > 1} {
 # The low lane's copy (cap_lo) and select (lo_sel) change at k = 3 of a read (select cleared;
 # cap gets the new byte at k = 8) and at k = 10 (copy; the core took byte A at that same edge, and
 # the next use is 2 clk_sys later): one clk_sys cycle more than the default.
-set lo_regs [get_registers {*sdram|lo_sel *sdram|cap_lo[*]}]
+# v2: the same holds for rom_q's high-lane hold (hold_sel, cap_hold: change at k = 2 or 3) and the
+# ARAM byte (ar_q: changes at k = 1 or 3; the S-DSP takes it >= 5 clk_sys after the address).
+set lo_regs [get_registers {*sdram|lo_sel *sdram|cap_lo[*] *sdram|hold_sel *sdram|cap_hold[*] *sdram|ar_q[*]}]
 set_multicycle_path -setup -end 2 -from $lo_regs -to $clk_sys
 set_multicycle_path -hold -end 1 -from $lo_regs -to $clk_sys
+# ar_q (k = 3) -> the S-DSP/SPC700's combinational outputs -> the controller's ARAM port, which it
+# samples only at k = 2 of the next clk_sys cycle (4 cycles on).
+set_multicycle_path -setup -end 4 -from [get_registers {*sdram|ar_q[*]}] -to $mem_regs
+set_multicycle_path -hold -end 3 -from [get_registers {*sdram|ar_q[*]}] -to $mem_regs
 # AB10 (chip B's DQM) is a constant.
 set_false_path -to [get_ports {sd_dqm_b}]
 

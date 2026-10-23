@@ -7,7 +7,8 @@
 // Wraps `main` (srg320's MiSTer SNES core via agg23's openfpga-SNES, GPL-3.0,
 // ~/src/vendor/openfpga-SNES/rtl/upstream/main.v) the way rtl/mister_top/SNES.sv (MAIN_SNES)
 // does on the Pocket, minus everything this board doesn't have yet:
-// - WRAM 128 KB, VRAM 2 x 32 KB, ARAM 64 KB and BW-RAM (BSRAM) are M10K; the cartridge ROM is
+// - WRAM 128 KB, VRAM 2 x 32 KB, ARAM 64 KB (or, ARAM_EXT = 1, outside through the ext_aram
+//   ports) and BW-RAM (BSRAM) are M10K; the cartridge ROM is
 //   served through the rom_* ports (SDRAM, quartus/common/sdram_rom.sv).
 // - No header parsing here: rom_type, rom_mask and ram_mask are inputs (what the Pocket's
 //   rom_parser.sv / MiSTer derive from the header: SA-1 = ROM_TYPE 8'h60, LoROM 00, HiROM 01,
@@ -19,7 +20,8 @@
 // The RAMs are plain inferred Verilog (Quartus maps them to M10K; Verilator simulates the same
 // code). Reads have one clk_sys cycle of latency like the altsyncram wrappers in bram.vhd.
 module snes_sdram_core #(
-    parameter        BSRAM_AW = 11           // BW-RAM bytes = 2^BSRAM_AW
+    parameter        BSRAM_AW = 11,          // BW-RAM bytes = 2^BSRAM_AW
+    parameter        ARAM_EXT = 0            // 1: ARAM outside (aram_* ports, quartus/snes_load v2)
 ) (
     input  wire        clk_sys,      // SNES master clock, 21.442 MHz (MCLK = ACLK)
     input  wire        reset,        // synchronous to clk_sys, active high
@@ -47,7 +49,20 @@ module snes_sdram_core #(
     // clock pulse is in progress (the real line is low then), d0 = port 1 data as on the pin
     output wire        joy_strb,
     output wire        joy_clk,
-    input  wire        joy1_d0
+    input  wire        joy1_d0,
+    // ARAM outside (ARAM_EXT = 1): the S-DSP/SPC700's 64 KB as an SDRAM port (sdram_rom8.sv):
+    // address, write data, read this cycle, write at the next edge; the byte read comes back on
+    // ext_aram_q at least 13 clk_mem (2.6 clk_sys) later and the DSP takes it >= 5 clk_sys after
+    // the address change
+    output wire [15:0] ext_aram_addr,
+    output wire [7:0]  ext_aram_d,
+    output wire        ext_aram_rd,
+    output wire        ext_aram_wr,
+    input  wire [7:0]  ext_aram_q,
+    // BW-RAM/SRAM clear: while held (and reset is held), the RAM is filled with zeros, one byte
+    // per clk_sys (bsram_clr_done when the whole 2^BSRAM_AW bytes are done)
+    input  wire        bsram_clr,
+    output reg         bsram_clr_done = 1'b0
 );
     // Reset as in MAIN_SNES: released on a fixed phase of a 4-cycle divider.
     reg       reset_n = 1'b0;
@@ -138,11 +153,29 @@ module snes_sdram_core #(
         .clk(clk_sys), .addr(vram1_addr[14:0]), .d(vram1_d), .we(~vram1_we_n), .q(vram1_q));
     snes_sdram_spram #(.AW(15)) vram2 (
         .clk(clk_sys), .addr(vram2_addr[14:0]), .d(vram2_d), .we(~vram2_we_n), .q(vram2_q));
-    snes_sdram_spram #(.AW(16)) aram (
-        .clk(clk_sys), .addr(aram_addr), .d(aram_d), .we(~aram_ce_n & ~aram_we_n), .q(aram_q));
+    assign ext_aram_addr = aram_addr;
+    assign ext_aram_d    = aram_d;
+    assign ext_aram_rd   = ~aram_ce_n & ~aram_oe_n;
+    assign ext_aram_wr   = ~aram_ce_n & ~aram_we_n;
+    generate if (ARAM_EXT) begin : g_aram_ext
+        assign aram_q = ext_aram_q;
+    end else begin : g_aram
+        snes_sdram_spram #(.AW(16)) aram (
+            .clk(clk_sys), .addr(aram_addr), .d(aram_d), .we(~aram_ce_n & ~aram_we_n), .q(aram_q));
+    end endgenerate
+    reg  [BSRAM_AW-1:0] clr_a = {BSRAM_AW{1'b0}};
+    always @(posedge clk_sys)
+        if (!bsram_clr) begin
+            clr_a <= {BSRAM_AW{1'b0}};
+            bsram_clr_done <= 1'b0;
+        end else if (!bsram_clr_done) begin
+            clr_a <= clr_a + 1'd1;
+            if (&clr_a) bsram_clr_done <= 1'b1;
+        end
+    wire clr_on = bsram_clr && !bsram_clr_done;
     snes_sdram_spram #(.AW(BSRAM_AW)) bsram (
-        .clk(clk_sys), .addr(bsram_addr[BSRAM_AW-1:0]), .d(bsram_d),
-        .we(~bsram_ce_n & ~bsram_we_n), .q(bsram_q));
+        .clk(clk_sys), .addr(clr_on ? clr_a : bsram_addr[BSRAM_AW-1:0]), .d(clr_on ? 8'h00 : bsram_d),
+        .we(clr_on | (~bsram_ce_n & ~bsram_we_n)), .q(bsram_q));
 endmodule
 
 // Single-port RAM, registered address, new data on read-during-write (as bram.vhd's spram).
