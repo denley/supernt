@@ -46,7 +46,8 @@ intro, both as in Mesen2; the SA-1 test, menu, second load and save RAM still pa
 controller fixes (`notes/snes-load.md`, "v7 build": no late ARAM reads in Yoshi's Island),
 timing fully met. Also on the card: `16-q-snes_load-v7.cor` (SA-1 + Super FX, without those
 fixes, clk_mem setup 0.13 ns short at slow 85 °C), `17-q-snes_gsu.cor` (Super FX only, without
-the fixes), `14-q-snes_load.cor` = v6. (The ~05:00 cores had a loader bug and were replaced.)
+the fixes), `19-q-snes_load-v72.cor` (SA-1 + Super FX with the fixes and v7.2's registered ARAM
+port, timing met: newer, less simulated than 18), `14-q-snes_load.cor` = v6. (The ~05:00 cores had a loader bug and were replaced.)
 `SPC/6 Yoshi's Island.spc` and `SPC/7 Star Fox.spc` are there.
 
 1. Start `tools/capview.py` (check `pgrep -a ffmpeg` afterwards; restart it if the live view
@@ -56,10 +57,11 @@ the fixes), `14-q-snes_load.cor` = v6. (The ~05:00 cores had a loader bug and we
    long time ago...", the title; start a game and play a little (listen to the music: a wrong
    ARAM byte would show as clicks or a stuck/garbled tune). DOWN+SELECT, **7 Star Fox**: intro
    with the 3D Arwings, a bit of the first level. (SA-1 games don't run on this core.)
-3. Then `tools/sdcore use 16` (SA-1 + Super FX): **2 Kirby Super Star** or **4 Super Mario
-   RPG** as the SA-1 check, and Yoshi's Island again (compare the music with 18).
-4. If 18 misbehaves: `tools/sdcore use 17` (same without the controller fixes) narrows it down.
-   `tools/sdcore use 14` goes back to v6.
+3. Then `tools/sdcore use 19` (**v7.2**: SA-1 + Super FX with the fixes, timing met with
+   margin): **2 Kirby Super Star** or **4 Super Mario RPG** as the SA-1 check, and Yoshi's
+   Island and Star Fox again. If all of that works, 19 is the one core for everything.
+4. If 18 misbehaves: `tools/sdcore use 17` (same without the controller fixes) narrows it down;
+   16 is the combined core without them. `tools/sdcore use 14` goes back to v6.
 
 ## memtest v3 (15-q-memtest, 23 Oct) results
 

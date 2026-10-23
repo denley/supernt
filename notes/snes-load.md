@@ -109,13 +109,23 @@ phase C in `make sim-sdram-rom8`: byte reads, addresses held 1-6 clk_sys, reads 
   it at slot 3). Phase C: 0 late, 0 wrong, ~1500 case III starts. Yoshi's Island, 360 frames:
   PASS, ARAM 0 late (v7.0: 2 by then, all 26 of its 700 frames at ROM `st 3 cnt 6`); SA-1
   regression PASS. Build: combined clk_mem setup -0.29 ns at slow 85 °C (SPC700 -> `upd_d`, the
-  ARAM decision), which v7.2 (below) addresses.
+  ARAM decision), which v7.2 addresses.
 - **lane 0 after back-to-back reads**: a ROM read started right after an even-address read
   got lo_sel set again by the old read's copy to cap_lo (rd2[CPY] came at the new read's
   cnt = 1, after its clear), so rom_q[7:0], the GSU's lane, showed the old word until the next
   read (phase C: 336 wrong bytes). The ACT now drops the pending copy (the core has left that
   word). Yoshi's/Star Fox's traffic apparently never does this (their ROM histograms are the
   same with the fix). Star Fox, 460 frames with both fixes: PASS, ARAM 0 late.
+
+**v7.2** (24 Oct morning, `TESTCORES/19-q-snes_load-v72.cor`): the ARAM port registered at
+k = 2 (`s_*`, straight from the core's signals) and decided at k = 4, with case III and the
+cap_lo fix. The SPC700 -> `upd_d` paths that limited the combined core are gone: **clk_mem
+setup +0.58 ns at slow 85 °C**, hold met, pins checked, the combined SA-1 + Super FX core meets
+timing. A read still starts at the next k = 0 (decided at k = 4 instead of 2, the same edge);
+the k = 3 read completion checks the k = 2 sample itself (`rd_now`, `s_wnew`); write updates
+reach ar_q one clk_sys later (8 clk after the address change, the DSP takes it >= 25 clk on).
+SDC: `s_*` -> the decision registers two cycles. `make sim-sdram-rom8` and the SA-1 regression
+pass; Yoshi's Island (700 frames) and Star Fox (460) were still running when it went on the card.
 
 ### v7 simulation
 
