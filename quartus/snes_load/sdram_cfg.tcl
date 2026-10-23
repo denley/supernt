@@ -14,6 +14,9 @@ set SDRAM_CAPTURE_HALF 8
 # keeps it a separate PLL output: with equal phases it merges it with the controller clock and
 # the SDC's clock names go away; the commands have half a cycle to the chips), capture clock
 # behind the SDRAM clock source (positions the read window).
-set SDRAM_MEM_LAG_PS 0
+# v7: 333 (two steps): the SA-1 + GSU build missed clk_sys -> clk_mem paths into the ARAM port
+# (sampled at k = 2) by ~0.25 ns; the lag gives them that, clk_mem -> clk_sys paths had ~0.8 ns
+# and commands to the chips 1.7 ns to spare. The read window is set by the capture clock.
+set SDRAM_MEM_LAG_PS 333
 set SDRAM_CLK_LEAD_PS 167
 set SDRAM_CAP_OFFSET_PS 833

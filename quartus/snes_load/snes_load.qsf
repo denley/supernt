@@ -7,7 +7,7 @@ source ../common/supernt.tcl
 source pins.tcl
 source sdram_params.tcl
 # As quartus/snes_sdram (settings from agg23's Pocket build of the same core).
-set_global_assignment -name OPTIMIZATION_MODE "AGGRESSIVE PERFORMANCE"
+set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
 set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
 set_global_assignment -name SAFE_STATE_MACHINE ON
 set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON

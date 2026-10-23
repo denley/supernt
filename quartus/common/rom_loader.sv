@@ -249,6 +249,13 @@ module rom_loader #(
     wire [2:0] gsu_rs = gsu_ramsz == 8'hFF ? 3'd5 : gsu_ramsz > 8'd6 ? 3'd6 : gsu_ramsz[2:0];
     wire       got_all = info_ok && rom_size >= info_size && info_size != 32'd0 && n_file > ROM_OFF;
     wire       idle_long = ms - t_last >= DONE_MS;
+    // registered (v7): the 32-bit compares feeding the end of the transfer were critical paths;
+    // the decision comes a clock later (a file byte in that clock still wins: b_go is first)
+    reg        got_all_q = 1'b0, idle_long_q = 1'b0;
+    always @(posedge clk) begin
+        got_all_q <= got_all;
+        idle_long_q <= idle_long;
+    end
     always @(posedge clk) begin
         push <= 1'b0;
         t_we <= 1'b0;
@@ -308,7 +315,7 @@ module rom_loader #(
                 end
             end
         end else case (state)
-            S_LOAD: if (got_all && f_empty || idle_long) begin
+            S_LOAD: if (got_all_q && f_empty || idle_long_q) begin
                 t_end <= ms;
                 crc_file <= ~fcrc;
                 crc_rom <= ~rcrc;

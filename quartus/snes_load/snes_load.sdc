@@ -35,15 +35,23 @@ set_clock_groups -asynchronous -group [get_clocks clk] \
 # rfsh_ok) is used at k >= 2 only: no ROM read starts and no address register loads at k = 0
 # and 1, and refresh slots are k = 2-4. So setup at k = 2 (-end 2) and the hold check back at
 # k = 0 (-hold -end 1: the edge where the old value is still there by definition).
+# With clk_mem late by SDRAM_MEM_LAG_PS (v7: 333 ps), k = 0 itself is the first clk_mem edge after
+# E, so every setup multicycle below counts one edge more (as quartus/snes_sdram.sdc does); the
+# hold edges stay where they were (k = 0 = E + lag: every such path must be longer than the lag,
+# the fitter pads short ones). tog_d then gets its setup at k = 1 explicitly.
+set lag_e [expr {$SDRAM_MEM_LAG_PS > 0 ? 1 : 0}]
 set mem_regs [remove_from_collection [get_registers {sdram_rom8:sdram|*}] [get_registers {sdram_rom8:sdram|tog_d}]]
-set_multicycle_path -setup -end 2 -from $clk_sys -to $mem_regs
+set_multicycle_path -setup -end [expr {2 + $lag_e}] -from $clk_sys -to $mem_regs
 set_multicycle_path -hold -end 1 -from $clk_sys -to $mem_regs
+if {$lag_e} {
+    set_multicycle_path -setup -end 2 -from $clk_sys -to [get_registers {sdram_rom8:sdram|tog_d}]
+}
 # The SNES CPU's live address (SCPU) reaches the ROM address only through SA1.vhd's
 # SNES_ROM_SEL = SNES_ROM_ACCESS(SNES_A) and not WINDOW: the CPU address changes only at a
 # SYSCLKF edge, where WINDOW goes to 1 in the same edge, and WINDOW goes back to 0 only at a later
 # SA-1 CE edge (>= 1 clk_sys cycle on), so SNES_A -> controller paths have at least one more
 # clk_mem cycle (notes/snes-sdram.md). The SA-1's own address and WINDOW keep the check above.
-set_multicycle_path -setup -end 3 -from [get_registers {snes_sdram_core:snes|main:main|SNES:SNES|SCPU:CPU|*}] -to $mem_regs
+set_multicycle_path -setup -end [expr {3 + $lag_e}] -from [get_registers {snes_sdram_core:snes|main:main|SNES:SNES|SCPU:CPU|*}] -to $mem_regs
 set_multicycle_path -hold -end 2 -from [get_registers {snes_sdram_core:snes|main:main|SNES:SNES|SCPU:CPU|*}] -to $mem_regs
 
 # ---------------------------------------------------------------- SDRAM (IS42S81600F-6)
@@ -99,6 +107,14 @@ set_multicycle_path -hold -end 1 -from $lo_regs -to $clk_sys
 # samples only at k = 2 of the next clk_sys cycle (4 cycles on).
 set_multicycle_path -setup -end 4 -from [get_registers {*sdram|ar_q[*]}] -to $mem_regs
 set_multicycle_path -hold -end 3 -from [get_registers {*sdram|ar_q[*]}] -to $mem_regs
+# ARAM write forwarding (v7): upd, upd_d and upd_tag load only in the k = 2 sample (upd is also
+# cleared at k = 3, from nothing in the queue); the write queue changes only at k = 0 (an
+# operation takes its head) and k = 2 (the sample appends or coalesces), or while the ARAM port
+# is off. So queue -> upd* paths have two clk_mem cycles (k = 0 -> k = 2), hold back at k = 0.
+set wq_regs [get_registers {*sdram|wq_a[*][*] *sdram|wq_d[*][*] *sdram|wq_n[*]}]
+set upd_regs [get_registers {*sdram|upd *sdram|upd_d[*] *sdram|upd_tag[*]}]
+set_multicycle_path -setup -end 2 -from $wq_regs -to $upd_regs
+set_multicycle_path -hold -end 1 -from $wq_regs -to $upd_regs
 # AB10 (chip B's DQM) is a constant.
 set_false_path -to [get_ports {sd_dqm_b}]
 
