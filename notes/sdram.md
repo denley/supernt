@@ -350,6 +350,36 @@ Console run 23 Oct ~22:00 (`~/scratch/cap/rec-20261023-215859.mkv`, 8 rounds; sc
   as on the console) and G2's address on 13 of the candidates: G1 clean at f2.5/r3, and every
   probe class comes out right; a 6 µs pull-up rise makes the probe fail.
 
+## memtest v3 result (23 Oct 2026): G1 works; G2's address pins found
+
+Console run 23 Oct ~22:20 (`~/scratch/cap/rec-20261023-215859.mkv` from ~18 min in; 13 rounds;
+`photos/memtest-v3-p1-2026-10-23.jpg`, `-p2-`):
+
+- **G1 works** [confirmed]: 0000000 errors at **f2.5 and r3** in all four passes shown (16 MB
+  each, every byte), column walk 000 at f2.5/r3. So with J8 low, the pin map of "Controller 2"
+  (shared N6 P6 P7 R7 P8 R9 H6 F7 D7 C8 = A0-A9, M6 = A11, E9/C9 = BA, H9 = A10, D12 D13 G13
+  E12 = CS# RAS# CAS# WE#, N8 J7 J9 K7 H11 G12 F12 J11 = DQ, clock H8) is a complete, working
+  16 MB x8 SDRAM at 74.25 MHz with spc.cor's MRS (N6 + R7); data one clock earlier than U4 (f2.5
+  / r3 instead of f3.5 / r4: CL2 from that MRS, or a faster board path; not resolved).
+- **G2's data path works** (open drain, 4 µs pull-up waits): every probe read returned one of
+  the bytes written, at r3 and r4 alike.
+- **G2 probe**, all 22 pins unambiguous (each matches exactly one class):
+
+| class | pins |
+|---|---|
+| A0-A9 or bank (b1 = b2 = X0) | **A14 B5 A13 A15 B15 E14 E15 E16 F13 A5 B16 C13 C15** (13) |
+| row-only (b1 = X0, b2 = Xw) | **D17** (A10, as decoded) |
+| not an address pin of G2 | G16 H13 C11 F15 G15 G17 G18 J17 |
+
+  An x8 IS42S81600F needs A0-A9 + BA0/BA1 (12) in the first class and A10 + A11 as row-only.
+  13 instead of 12, and no A11: one of the 13 may be A11 wired so that it also matters at
+  WRITE (not on this part), or a chip select (high at ACT: the bank never opens; high at WRITE:
+  the write is ignored; both read as "address"). C13/C15 are one FF in spc.cor (high only in
+  controller 2's MRS) but act as two separate pins here. Next probe: tell BA from A0-A9 (a
+  bank pin high at ACT and low at READ leaves the bank closed: G2 doesn't drive) and find the
+  odd one out.
+- **U4 byte A**: still silent (none of these pins).
+
 ## Constant pins: AB10 and the open-drain group (after hwtest v1, Oct 2026)
 
 hwtest v1 on the console (22 Oct, `notes/hardware-tests.md`): all eight capture points wrong on

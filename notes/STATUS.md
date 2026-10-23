@@ -53,22 +53,24 @@ Card" loader, BIOS files are on the card in `/BIOS`).
   must read 02; PIC UI loop reads the pad at `0x2000/0x2001`; its screen is a 64×32 2-byte-cell
   text map at `0x1018_0000`; **a run file arrives verbatim at link address `0x0000_FF00` + file
   offset** (1 MB in ~0.6 s); after a file the PIC goes silent until DOWN+SELECT.
-- SDRAM (`notes/sdram.md`, "Which chip is which", revised 23 Oct): the bottom-bank bus (AB11
-  clock) is the **x16 AS4C8M16SA (U4)**, not the x8 pair: its 512-column page gives it away.
-  "Chip B" = its byte on 3B (works, 8 MB used, AB10 = that byte's DQM, held low); "chip A" =
-  its other byte on 2A, masked by U4's second DQM, which we don't drive yet (not any constant
-  pin; best candidate C13/C15). The top-bank controller (148.5 MHz, H8 clock) is the **x8 pair
-  U5 + U16 (2 × 16 MB)** and is now fully decoded: shared A0–A11/BA/clock, separate
-  CS#/RAS#/CAS#/WE#/A10 and 8 data pins per chip, CL3 (`notes/sdram.md`, "Controller 2").
+- SDRAM (`notes/sdram.md`, "Which chip is which" and the memtest results, 23 Oct): three
+  chips, 48 MB.
+  - **U4** (AS4C8M16SA x16, bottom-bank bus, AB11 clock): the bus our SNES core uses. Byte B
+    (3B, AB10 = its DQM, low) works, 8 MB; byte A (2A) has never answered (enable not found).
+  - **G1** (one IS42S81600F of U5/U16, top-bank bus, H8 clock): **works**, 16 MB, every byte
+    (memtest v3); needs **J8 low** (a top-bank constant no earlier core drove); data one clock
+    earlier than U4.
+  - **G2** (the other one): its own command pins, open-drain data pins and address pins;
+    enabled by **B13 low**; data path works; address pins found (13 + D17), bank/odd-one-out
+    still to tell apart.
 
 ## Next steps (agreed direction)
 
 1. **Super FX 1/2** (Star Fox, Yoshi's Island, both on the card): the vendor core has the GSU;
    the work is memory. M10K is full (299/308: WRAM/VRAM live in block RAM), logic at 79 %, and
    GSU games need 32–64 KB RAM plus fast ROM/RAM access that one 8-bit chip may not give.
-   Plan: a test core (one console run) that brings up **U5 + U16** with the decoded pin map
-   and tests U4 with chip A's DQM candidates (C13/C15 low vs released) in the same run; then
-   move WRAM/GSU RAM there and add the GSU. Estimate: 3–5 console runs.
+   Memory now available: G1 (16 MB, fully mapped) besides U4's byte B; G2 nearly mapped.
+   Next: one more probe for G2's bank pins, then put WRAM/GSU RAM in G1 and add the GSU.
 2. Optional: DSP-1 in our core (small; vendor `DSPn`), larger ROMs, more games.
 3. Not possible (decoded): saves to SD from the SPC player context.
 

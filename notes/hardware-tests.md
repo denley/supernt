@@ -35,6 +35,12 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## memtest v3 (15-q-memtest, 23 Oct) results
+
+Run 23 Oct ~22:20 (`notes/sdram.md`, "memtest v3 result"): **G1 0 errors at f2.5/r3** in every
+pass (works); G2's probe found 13 address/bank pins plus D17 (A10); U4 byte A still silent.
+`15-q-memtest` (v3) is still installed as spc.cor: `tools/sdcore use 14` restores the SNES core.
+
 ## Next session: memtest v3 (prepared 23 Oct)
 
 Everything at spc.cor's levels (J8, B13 and the other top-bank constants low, D9/E10 high,
