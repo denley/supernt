@@ -77,6 +77,21 @@ sample (register the port at k = 2, decide at k = 3), which needs care: a read c
 must then also see a write to its address sampled in the same clock (today `a_stale`, set at
 k = 2, covers that).
 
+Rebuilt with the loader fix (24 Oct ~06:00, now on the card as 16 and 17): combined **-0.126 ns
+at slow 85 °C, +0.069 ns at 0 °C**, hold met; Super FX-only setup +0.18 ns, hold 2 ps short at
+fast 0 °C on SPC700 -> `last_wd` (harmless: last_wd loads only at the k = 2 sample, not at the
+k = 0 edge that check is for). A 0.25 ns fitter hold margin for snes_gsu met that hold but left
+setup 9 ps short, so it stayed 0.15.
+
+Bug in the first v7 cards cores (fixed in 6ab00a1, rebuilt the same night): the registered
+end-of-transfer flags `got_all_q`/`idle_long_q` still held the state from before a file when
+its first byte arrived (`idle_long` true after the wait in the browser, `got_all` from the last
+file), so the transfer could end at once. The Yoshi/Star Fox sims (`TB_FAST`, one file, no wait)
+didn't show it; the SA-1 regression did (second file 98815 of 98816 bytes, 1 order error). Both
+flags now clear on every file byte. Lesson: after any `rom_loader` change rerun the SA-1 regression
+(`make sim-snes-load`, or `Vtb 62 ... sa1test.spc` on the GSU build: byte gaps, a second file),
+not only the game sims.
+
 `quartus/snes_gsu` (`make out/q-snes_gsu.cor`): the same top with `USE_SA1 = 0` (sources,
 pins, SDRAM settings and SDC all from `quartus/snes_load`), to test the Super FX without the
 timing doubt. SA-1 carts don't run on it.
@@ -102,7 +117,12 @@ in for Yoshi's Island, ~18 for Star Fox):
   Nintendo logo at frame ~330, both as in Mesen2 (its frames 80-260 and 300)
   (`photos/sim-yoshi-logo-2026-10-24.png`). 0 SDRAM model errors, ROM bytes within 3 clocks.
 - **Star Fox** (GSU-1, 10.7 MHz, with the refresh hint): the starfield with "NINTENDO PRESENTS"
-  at frame ~320, as Mesen2's frame 300 (`photos/sim-starfox-title-2026-10-24.png`).
+  at frame ~320, as Mesen2's frame 300 (`photos/sim-starfox-title-2026-10-24.png`); long run
+  (460 frames): the GSU-drawn 3D Arwings of the intro at frame 459
+  (`photos/sim-starfox-arwings-2026-10-24.png`), PASS, ARAM 0 late; the ROM histogram had 6
+  addresses left before their byte (see the cap_lo fix below).
+- **Yoshi's Island** long run (700 frames): "A long, long time ago..." under the logo at frame
+  ~620 (`photos/sim-yoshi-story-2026-10-24.png`).
 - Before the ROM address hold, Yoshi's Island stayed black: the GSU never finished its first job.
 
 `TB_ROMLAT=1` adds the ROM byte latency histogram (clk_sys edges from an address change to its
