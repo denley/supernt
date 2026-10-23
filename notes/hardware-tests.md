@@ -487,4 +487,5 @@ chord file was run (results below); the link part showed why nothing else could 
   times over ~9 s of holds and never woke (UI loop last at 0x21D8, before the boot). So it wakes
   on SELECT alone (0x04), not on any value with SELECT in it. v6 sends it that.
 - 23 Oct 2026, snes_load **v6 built** (seed 2, timing met +0.509 ns): a 300 ms SELECT-alone press
-  for the PIC on DOWN+SELECT during games.
+  for the PIC on DOWN+SELECT during games. Installed on the card as `14-q-snes_load`; v5 kept
+  as `TESTCORES/93-q-snes_load-v5.cor`.
