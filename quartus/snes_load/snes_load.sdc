@@ -112,10 +112,20 @@ set_multicycle_path -hold -end 1 -from $lo_regs -to $clk_sys
 # samples only at k = 2 of the next clk_sys cycle (4 cycles on).
 set_multicycle_path -setup -end 4 -from [get_registers {*sdram|ar_q[*]}] -to $mem_regs
 set_multicycle_path -hold -end 3 -from [get_registers {*sdram|ar_q[*]}] -to $mem_regs
-# ARAM write forwarding (v7): upd, upd_d and upd_tag load only in the k = 2 sample (upd is also
-# cleared at k = 3, from nothing in the queue); the write queue changes only at k = 0 (an
-# operation takes its head) and k = 2 (the sample appends or coalesces), or while the ARAM port
-# is off. So queue -> upd* paths have two clk_mem cycles (k = 0 -> k = 2), hold back at k = 0.
+# ARAM port (sdram_rom8.sv v7.1): the core's signals are registered at k = 2 (s_*, nothing else
+# loads them) and the decision block runs at k = 4. Its registers take s_*-derived values only
+# there, so s_* -> them has two clk_mem cycles (k = 2 -> k = 4), hold back at k = 2. Not
+# ar_q/tag/tag_ok: the read completion at k = 3 also looks at s_* (one cycle).
+set s_regs [get_registers {*sdram|s_en *sdram|s_rd *sdram|s_wr *sdram|s_addr[*] *sdram|s_d[*]}]
+set dec_regs [get_registers {*sdram|cur_rd[*] *sdram|upd *sdram|upd_d[*] *sdram|upd_tag[*] *sdram|rq_need
+    *sdram|rq_addr[*] *sdram|rq_age[*] *sdram|fwd_evt *sdram|last_wv *sdram|last_wa[*] *sdram|last_wd[*]
+    *sdram|a_stale *sdram|wq_a[*][*] *sdram|wq_d[*][*] *sdram|wq_n[*] *sdram|n_ar_drop[*]}]
+set_multicycle_path -setup -end 2 -from $s_regs -to $dec_regs
+set_multicycle_path -hold -end 1 -from $s_regs -to $dec_regs
+# Forwarding: upd, upd_d and upd_tag load only in the decision block (k = 4; upd is also cleared
+# at k = 3, from nothing in the queue); the write queue changes only at k = 0 (an operation takes
+# its head) and k = 4 (the decision appends or coalesces), or while the ARAM port is off. So queue
+# -> upd* paths have at least two clk_mem cycles, hold back at the launch edge.
 set wq_regs [get_registers {*sdram|wq_a[*][*] *sdram|wq_d[*][*] *sdram|wq_n[*]}]
 set upd_regs [get_registers {*sdram|upd *sdram|upd_d[*] *sdram|upd_tag[*]}]
 set_multicycle_path -setup -end 2 -from $wq_regs -to $upd_regs
