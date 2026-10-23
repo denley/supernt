@@ -3,6 +3,9 @@
 Reverse engineering the Analogue Super Nt jailbreak firmware, with the long-term goal of running
 our own FPGA cores on it (an SNES core with SA-1 support).
 
+**Status (23 Oct 2026): our SNES + SA-1 core loads and runs games from the SD card on the
+console.** Current state, how to use it, next steps and the test workflow: `notes/STATUS.md`.
+
 Nothing from Analogue or the jailbreak author is committed here: `make` downloads the jailbreak
 into `firmware/` (gitignored) and everything else is derived from it locally.
 

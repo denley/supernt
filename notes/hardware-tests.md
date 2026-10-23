@@ -451,5 +451,5 @@ chord file was run (results below); the link part showed why nothing else could 
   Star played (The Great Cave Offensive), back to the PIC's browser without a power cycle
   (DOWN+SELECT, the JB menu combo: the PIC watches the pad itself, v2 polls with the stock
   waveform and follows the PIC's screen), then Super Mario RPG: new game, naming screen, intro,
-  Bowser's Keep. Kirby's Dream Land 3 also played (user). RESET not tried.
+  Bowser's Keep. Kirby's Dream Land 3 not in the recorded part (not confirmed). RESET not tried.
   Photo: `photos/snes-load-v2-2026-10-23.jpg`.
