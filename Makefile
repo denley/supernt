@@ -342,7 +342,7 @@ sim-sdram-rom: $(SDROM_SIM)
 # the same timed model (COL_BITS 9): rise 4 (the built point) must work for board delays D_CLK
 # 1-6 ns (+ D_IN 1 ns), fall 3.5 and rise 5 must fail; it also checks the
 # second byte of each even-address read (the SA-1's 16-bit VBP word, taken one SA-1 cycle
-# later with sa1_vbp.patch) and the aux read port.
+# later with sa1_vbp.patch), the aux read port, and (v7) GSU-like back-to-back byte reads.
 SDROM8_SIM := quartus/snes_load/sim/tb_sdram_rom8.sv quartus/snes_sdram/sim/sdram_model.v \
   quartus/snes_sdram/sim/ddio_model.v quartus/common/sdram_rom8.sv
 sim-sdram-rom8: $(SDROM8_SIM)

@@ -47,8 +47,10 @@
 // runs one bank-3 operation at a time, started only at k = 0 in command slots the ROM schedule
 // never uses (slot s = clk edges after the start, ROM read with ACT at slot a: a+2 READ, a+4
 // second READ, a+5 PRECHARGE, ACTs only at k = 2-4):
-//   - start allowed when the ROM sequencer is idle (case I) or 3 cycles into a read (case II,
-//     ACT at the previous k = 2); never while a REF runs; REF waits for the bank;
+//   - start allowed when the ROM sequencer is idle (case I), 3 cycles into a read (case II,
+//     ACT at the previous k = 2) or in a read's last cycle (case III, v7: ACT at the k = 4 before
+//     last; banks 0-2 only, and from slot 1 on it is case I, writes as write I: the read's last
+//     word left the bus by slot 2 + tHZ); never while a REF runs; REF waits for the bank;
 //   - read:     ACT 0, READ 3, PRECHARGE 5; the byte is captured in `cap` at slot 7 (READ + 4,
 //               as every read) and copied to ar_q at slot 8 (k = 3, two cycles before the next
 //               clk_sys edge); a ROM read at slot 2 puts its READ at 4 (its word follows ours);
@@ -259,7 +261,11 @@ module sdram_rom8 #(
 
     wire        case1 = st == S_IDLE && !rf_limit;
     wire        case2 = st == S_READ && cnt == 15'd3;
-    wire        a_start = ar_en && ready && k_now == 3'd0 && !a_on && (case1 || case2) &&
+    // (v7) case III: the read's last cycle (its PRECHARGE was the edge before; banks 0-2 only,
+    // so bank 3 may open): from slot 1 on as case I. Without it a read started at k = 4 blocked
+    // both k = 0 edges of its run, and back-to-back GSU reads made ARAM reads late
+    wire        case3 = st == S_READ && cnt == RD_END[14:0] - 15'd1 && !rf_limit;
+    wire        a_start = ar_en && ready && k_now == 3'd0 && !a_on && (case1 || case2 || case3) &&
                           (rq_need || wq_n != 3'd0);
     wire        a_rdop = rq_need;                   // the operation a_start begins
     wire [15:0] a_saddr = rq_need ? rq_addr : wq_a[0];
@@ -274,7 +280,7 @@ module sdram_rom8 #(
         a_cmd = C_NOP; a_hard = 1'b0; a_pa = 12'd0; a_res = 16'd0;
         if (a_start) begin
             a_cmd = C_ACT; a_hard = 1'b1; a_pa = {5'd0, a_saddr[15:9]};
-            if (a_rdop || case1) begin a_res[3] = 1'b1; a_res[5] = 1'b1; end
+            if (a_rdop || !case2) begin a_res[3] = 1'b1; a_res[5] = 1'b1; end
             else begin a_res[8] = 1'b1; a_res[10] = 1'b1; end
         end else if (a_on) begin
             case (a_op)
@@ -400,6 +406,10 @@ module sdram_rom8 #(
                     if (rd_req && !a_block) begin
                         cmd(C_ACT);
                         st <= S_READ;
+                        // (v7) a read right after an even one: the core has left that word, so
+                        // its pending copy to cap_lo is dropped (it would come at this read's
+                        // cnt = 1, after lo_sel's clear, and lane 0 would show the old word)
+                        rd2 <= 8'd0;
                     end
                 end else if (aux_req) begin
                     cmd(C_ACT);
@@ -548,7 +558,7 @@ module sdram_rom8 #(
                 // address change at E), too late for a DSP CE edge 5 clk_sys after E
                 if (rq_age > 3'd2 && n_ar_late != 16'hffff) n_ar_late <= n_ar_late + 16'd1;
             end else begin
-                a_op <= case1 ? A_WI : A_WII; a_addr <= wq_a[0]; a_data <= wq_d[0];
+                a_op <= case2 ? A_WII : A_WI; a_addr <= wq_a[0]; a_data <= wq_d[0];
                 for (qi = 0; qi < 3; qi = qi + 1) begin
                     wq_a[qi] <= wq_a[qi + 1]; wq_d[qi] <= wq_d[qi + 1];
                 end
