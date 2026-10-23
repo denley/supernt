@@ -16,7 +16,13 @@
 //      SA-1's VBP word with sa1_vbp.patch);
 //   3. phase B: 600 cycles with a new address in every one (no hidden refresh slot): refresh
 //      within 15.6 us, late reads only counted;
-//   4. phase A again (2000 cycles).
+//   4. phase A again (2000 cycles);
+//   5. phase C (v7, GSU-like): 30000 byte reads (rom_word = 0), each address held 1-6 clk_sys
+//      and changed at any clk_sys edge, so reads also run back to back and start at k = 3 and
+//      4 (the pattern that made a few ARAM reads late in Yoshi's Island); a byte held >= 5 clk_sys
+//      is checked at its last edge. ARAM reads must not be late here either. Before v7's case
+//      III start and rd2 drop (sdram_rom8.sv) this phase had 18 late and 11 wrong ARAM bytes and
+//      336 wrong ROM bytes.
 // All the time the ROM port runs, an S-DSP stand-in uses the ARAM port (v2: bank 3 at
 // 0x600000): one access per DSP substep (5 or 6 clk_sys, CEGen's 4.096 MHz pattern), 55% reads
 // (half of them of recently written or read addresses), 35% writes (held for the whole substep,
@@ -131,7 +137,7 @@ module tb_sdram_rom8;
         sys_tog <= ~sys_tog;
         if (mode != 0) begin
             clk_ce <= ~clk_ce;
-            if (clk_ce) begin                       // SA-1 CE edge: latch data, next address
+            if (clk_ce && mode != 3) begin          // SA-1 CE edge: latch data, next address
                 if (have_exp) begin
                     reads[ph] = reads[ph] + 1;
                     if ((rom_addr[0] && rom_word ? rom_q[15:8] : rom_q[7:0]) !== exp_b) begin
@@ -175,6 +181,31 @@ module tb_sdram_rom8;
             end
         end
     end
+
+    // phase C: GSU-like reads
+    integer    hold_n = 0, held = 0, c_reads = 0, c_errs = 0, c_late0 = 0, n_c3 = 0;
+    reg        have_c = 0;
+    reg [7:0]  exp_c;
+    reg [22:0] cur_c;
+    always @(posedge clk_sys) if (mode == 3) begin
+        held = held + 1;
+        if (held >= hold_n) begin
+            if (have_c && hold_n >= 5) begin
+                c_reads = c_reads + 1;
+                if (rom_q[7:0] !== exp_c) begin
+                    c_errs = c_errs + 1;
+                    if (c_errs <= 5 && !EXPECT_FAIL)
+                        $display("%t phase C: read %h (held %0d) got %h expected %h", $realtime, rom_addr, hold_n, rom_q[7:0], exp_c);
+                end
+            end
+            cur_c = wl[rnd(0) % nw];
+            rom_addr <= {1'b0, cur_c}; rom_word <= 1'b0; exp_c <= dat(cur_c);
+            have_c = 1;
+            hold_n = 1 + rnd(0) % 6; held = 0;
+            cycles = cycles + 1;
+        end
+    end
+    always @(posedge clk) if (dut.a_start && dut.case3) n_c3 = n_c3 + 1;
 
     // ---------------------------------------------------------------- S-DSP stand-in
     reg  [7:0]  shadow [0:65535];
@@ -282,6 +313,11 @@ module tb_sdram_rom8;
         ph = 3; cycles = 0;
         wait (cycles == 2000);
         $display("%t phase A again: %0d reads, %0d errors, %0d VBP-word errors", $realtime, reads[3], errs[3], vbp_errs[3]);
+        c_late0 = n_ar_late;
+        mode = 3; cycles = 0;
+        wait (cycles == 30000);
+        $display("%t phase C (GSU-like): %0d bytes checked, %0d errors, ARAM late %0d, ARAM starts at ROM cnt 6 %0d",
+                 $realtime, c_reads, c_errs, n_ar_late - c_late0, n_c3);
         $display("model: %0d errors, %0d ACT, %0d READ, %0d words written, %0d REF, longest REF gap %0.0f ns; bus contention %0d; controller rf_max %0d cycles, stall %0d",
                  mem.errors, mem.n_act, mem.n_rd, mem.n_wr, mem.n_ref, mem.max_ref_gap, contention, rf_max, n_rf_stall);
         @(posedge clk_sys);
@@ -298,14 +334,14 @@ module tb_sdram_rom8;
                 if (k <= 5) $display("ARAM backdoor %h = %h, expected %h", i, mem.mem[{1'b0, 23'h600000 + i}][15:8], shadow[i]);
             end
         if (EXPECT_FAIL) begin
-            ok = errs[1] + errs[3] > 0;
+            ok = errs[1] + errs[3] > 0;   // (phase C isn't judged here)
             $display("%s: CAPTURE_HALF %0d %s (phase A errors %0d)", ok ? "PASS" : "FAIL", CAPTURE_HALF,
                      ok ? "fails as expected" : "unexpectedly works", errs[1] + errs[3]);
         end else begin
             ok = errs[1] == 0 && errs[3] == 0 && vbp_errs[1] == 0 && vbp_errs[3] == 0 && berr == 0 &&
                  ar_errs == 0 && n_ar_drop == 0 && n_clash == 0 && ar_reads > 1000 && k == 0 &&
                  aerr == 0 && mem.errors == 0 && contention == 0 && mem.max_ref_gap <= 15625.0 &&
-                 n_rf_forced > 0 && reads[1] > 3000;
+                 n_rf_forced > 0 && reads[1] > 3000 && c_errs == 0 && c_reads > 5000 && n_ar_late == 0;
             $display("%s: CAPTURE_HALF %0d, D_CLK %0.1f D_OUT %0.1f D_IN %0.1f", ok ? "PASS" : "FAIL",
                      CAPTURE_HALF, D_CLK, D_OUT, D_IN);
         end
