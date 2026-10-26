@@ -16,8 +16,14 @@ reloaded). It says "no new frames" when the picture hasn't changed for 3 s (no H
 The capture ends whenever the HDMI signal goes away (console off, core loading, video mode
 change), so ffmpeg is restarted in a loop, one rec-*.mkv per stretch of signal. Ctrl-C (or
 kill -INT) stops it. Frames for reading: tools/frames.sh REC.mkv DIR [fps].
+
+Disk use (MJPEG is ~6 GB an hour; one overnight run left on filled 63 GB): rec-*.mkv files older
+than KEEP_DAYS are deleted whenever a recording starts, and when the disk gets below MIN_FREE_GB
+free, recording stops (the live view keeps going) and homebox-notify pushes to Denley's phone.
+Copy a recording elsewhere if a note needs it kept longer.
 """
 import glob
+import shutil
 import http.server
 import os
 import socketserver
@@ -27,6 +33,9 @@ import threading
 import time
 
 ADDR = ('100.110.207.42', 8765)   # homebox's tailnet IP: not reachable from the LAN/internet
+KEEP_DAYS = 7
+MIN_FREE_GB = 80                  # health-check warns at 85% of 452 GB, i.e. ~68 GB free
+NOTIFY = os.path.expanduser('~/server/updates/homebox-notify')
 outdir = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else '~/scratch/cap')
 os.makedirs(outdir, exist_ok=True)
 ff = (glob.glob(os.path.expanduser(
@@ -34,17 +43,52 @@ ff = (glob.glob(os.path.expanduser(
 
 
 def ffmpeg_cmd(rec):
-    return [ff, '-hide_banner', '-loglevel', 'error',
-            '-f', 'v4l2', '-input_format', 'mjpeg', '-video_size', '1920x1080', '-framerate', '30',
-            '-thread_queue_size', '512', '-i', '/dev/video0',
-            '-f', 'alsa', '-thread_queue_size', '512', '-i', 'hw:CARD=MS2109',
-            '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'pcm_s16le', rec,
-            '-map', '0:v', '-vf', 'fps=10,scale=960:540', '-c:v', 'mjpeg', '-q:v', '5',
-            '-f', 'mpjpeg', '-boundary_tag', 'frame', 'pipe:1']
+    """rec=None: live view only, nothing written to disk."""
+    cmd = [ff, '-hide_banner', '-loglevel', 'error',
+           '-f', 'v4l2', '-input_format', 'mjpeg', '-video_size', '1920x1080', '-framerate', '30',
+           '-thread_queue_size', '512', '-i', '/dev/video0']
+    if rec:
+        cmd += ['-f', 'alsa', '-thread_queue_size', '512', '-i', 'hw:CARD=MS2109',
+                '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'pcm_s16le', rec]
+    return cmd + ['-map', '0:v', '-vf', 'fps=10,scale=960:540', '-c:v', 'mjpeg', '-q:v', '5',
+                  '-f', 'mpjpeg', '-boundary_tag', 'frame', 'pipe:1']
+
+
+def free_gb():
+    return shutil.disk_usage(outdir).free / 1e9
+
+
+def prune():
+    """Delete recordings older than KEEP_DAYS."""
+    cutoff = time.time() - KEEP_DAYS * 86400
+    for f in glob.glob(os.path.join(outdir, 'rec-*.mkv')):
+        if os.path.getmtime(f) < cutoff:
+            print(f'deleting {f} (older than {KEEP_DAYS} days)', flush=True)
+            os.remove(f)
+
+
+def stop_recording():
+    """Disk nearly full: carry on with the live view only."""
+    global recording
+    recording = False
+    msg = f'Under {MIN_FREE_GB} GB free on /: stopped recording, live view still on. ' \
+          f'Delete old {outdir}/rec-*.mkv and restart capview.'
+    print(msg, flush=True)
+    subprocess.run([NOTIFY, '--tag', 'capview', 'capview stopped recording', msg])
+    if proc:
+        proc.terminate()            # the reader loop restarts ffmpeg without the file output
+
+
+def disk_guard():
+    while not stopping:
+        if recording and free_gb() < MIN_FREE_GB:
+            stop_recording()
+        time.sleep(30)
 
 
 proc = None
 stopping = False
+recording = True
 latest = b''
 frame_id = 0
 cond = threading.Condition()
@@ -55,9 +99,12 @@ def reader():
     JPEG frames."""
     global latest, frame_id, proc
     while not stopping:
-        rec = os.path.join(outdir, time.strftime('rec-%Y%m%d-%H%M%S.mkv'))
+        prune()
+        if recording and free_gb() < MIN_FREE_GB:
+            stop_recording()
+        rec = os.path.join(outdir, time.strftime('rec-%Y%m%d-%H%M%S.mkv')) if recording else None
         proc = subprocess.Popen(ffmpeg_cmd(rec), stdout=subprocess.PIPE)
-        print(f'recording {rec}', flush=True)
+        print(f'recording {rec}' if rec else 'live view only, not recording', flush=True)
         buf = b''
         while True:
             chunk = proc.stdout.read(65536)
@@ -75,7 +122,7 @@ def reader():
                     cond.notify_all()
                 buf = buf[e + 2:]
         proc.wait()
-        if os.path.exists(rec) and os.path.getsize(rec) < 100000:
+        if rec and os.path.exists(rec) and os.path.getsize(rec) < 100000:
             os.remove(rec)          # no signal: nothing worth keeping
         time.sleep(1)
 
@@ -173,6 +220,7 @@ print(f'live view http://homebox.jaguar-munsell.ts.net:{ADDR[1]}/', flush=True)
 srv = Server(ADDR, Handler)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 threading.Thread(target=reader, daemon=True).start()
+threading.Thread(target=disk_guard, daemon=True).start()
 try:
     while True:
         time.sleep(1)

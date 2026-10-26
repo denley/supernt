@@ -100,8 +100,10 @@ Card" loader, BIOS files are on the card in `/BIOS`).
 - Pin safety: only drive pins the stock core drives, with its settings; `tools/checkpins.py`
   runs in every Quartus build.
 - Quartus ignores initial values written in ANSI port declarations: use internal registers.
-- Long Quartus builds and sims run in the background; the repo has no remote (local commits).
+- Long Quartus builds and sims run in the background; the repo is backed up to a private
+  GitHub repo (`denley/supernt`, since 26 Oct; push `main` and branches worth keeping).
   Work done on a branch/worktree can go straight into `main` (fast-forward) without asking
   (Denley, 23 Oct).
-- Throwaway data: `~/scratch/cap` (~17 GB of recordings), `~/scratch/hwtest-videos`, decode
+- Throwaway data: `~/scratch/cap` (recordings; `capview.py` deletes them after 7 days and stops
+  recording below 80 GB free, so copy one elsewhere if a note must keep it), `~/scratch/hwtest-videos`, decode
   scripts in `~/scratch/*`; all safe to delete.
