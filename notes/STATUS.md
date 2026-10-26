@@ -105,5 +105,6 @@ Card" loader, BIOS files are on the card in `/BIOS`).
   Work done on a branch/worktree can go straight into `main` (fast-forward) without asking
   (Denley, 23 Oct).
 - Throwaway data: `~/scratch/cap` (recordings; `capview.py` deletes them after 7 days and stops
-  recording below 80 GB free, so copy one elsewhere if a note must keep it), `~/scratch/hwtest-videos`, decode
+  recording below 80 GB free, so copy one elsewhere if a note must keep it; every recording up
+  to 24 Oct, including those the notes cite, was deleted 26 Oct), `~/scratch/hwtest-videos`, decode
   scripts in `~/scratch/*`; all safe to delete.
