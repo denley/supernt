@@ -39,7 +39,9 @@ pulling it.
 
 Questions: does a save in the file reach BW-RAM, and can `tools/savedump.py` read the dump
 back, from the capture and from phone photos? (`notes/snes-load.md`, "Saves (v8)".) Core:
-`20-q-snes_load-v8` as spc.cor (`tools/sdcore setup` numbers it; check `list`). On the card:
+`20-q-snes_load-v8` as spc.cor. **Card not prepared yet** (it wasn't in homebox's reader on
+26 Oct): mount it, `cp out/q-snes_load-v8.cor /mnt/sd/TESTCORES/20-q-snes_load-v8.cor`,
+`tools/sdcore use 20`, `make load-spcs && tools/sdcore roms`. On the card then:
 `SPC/9 SAVE TEST.spc` (the SA-1 test ROM with a 32 KB BW-RAM header and a 30000-byte save,
 `build/snes_load/savetest.sav`).
 

@@ -521,6 +521,12 @@ the reset moves the ROM address to 0 while a read waits; nothing takes that byte
 testbench allows exactly that one). `make sim-snes-load` (no save in the file, the second
 load keeps the RAM): PASS.
 
+**Build (26 Oct, Quartus 25.1 Lite, seed as before):** `.cor` sha1 431b7710c1bb…, 16,241 /
+18,480 ALMs (88 %, v7.2 86 %), 301 / 308 RAM blocks (+1: the parity rows; BW-RAM as true dual
+port takes the same blocks), **timing met at all four corners** (worst setup +0.294 ns at slow
+85 °C, hold +0.110 ns at fast 0 °C), pin check 87 user I/Os as assigned. Kept as
+`~/src/supernt/out/q-snes_load-v8.cor` (for TESTCORES 20).
+
 Workflow: play, save in the game, L+R+SELECT+X, photograph each page (RIGHT between them), B;
 then, any time before the next session, the photos and the card into homebox and
 `tools/savedump.py decode PHOTOS... --spc /mnt/sd/SPC`; the next load of that game says
