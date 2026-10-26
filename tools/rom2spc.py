@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Wrap a SNES ROM in a file the Super Nt's SPC player accepts and sends over the PIC32 link.
 
-Usage: rom2spc.py ROM OUT.spc [--title TEXT] [--pad SIZE] [--length SECONDS] [--save-probe RAM]
+Usage: rom2spc.py ROM OUT.spc [--title TEXT] [--save FILE.sav] [--pad SIZE] [--length SECONDS]
+                   [--save-probe RAM]
 
 The SPC player (Tools -> "Play SPC Files", JB7.2) checks that a file is an SPC and then writes
 the whole file verbatim to link address 0x0000_FF00 + file offset (notes/hardware-tests.md,
@@ -11,6 +12,9 @@ file is:
   0x00000-0x101FF  a complete, valid, silent .spc (header + ID666 tag with the ROM's name as
                    the song title, 64 KB SPC700 RAM with `bra *` at $0400, DSP registers with
                    no voice keyed on and FLG = mute)
+  0x00100-0x100FF  (the SPC700 RAM) with --save: the save, up to 64 KB, from offset 0x100 on
+                   (snes_load v8 loads it into BW-RAM/SRAM before the boot; the core never plays
+                   the .spc part, so it doesn't matter that the "song" is no longer silent)
   0x10180-0x101BF  (the SPC format's unused 64 bytes) the info block below
   0x10200-         the ROM, without a 512-byte copier header (dropped when size % 32 KB = 512)
 
@@ -23,9 +27,12 @@ so ROM byte k arrives at link address 0x2_0100 + k. Info block (little-endian):
   +0x11  1  this tool's mapper guess, MiSTer ROM_TYPE encoding (bits 3-0: 0 LoROM, 1 HiROM,
             2 ExHiROM; bits 7-4: chip, 6 = SA-1, 7 = Super FX); the core decides by itself and shows both
   +0x12  1  header ROM size byte    +0x13  1  header RAM size byte
-  +0x14 12  reserved (0)
+  +0x14  4  save size in bytes (0 = no save)   +0x18  4  CRC-32 (zlib) of the save
+  +0x1C  4  reserved (0)
   +0x20 32  ROM name (ASCII, space-padded): the core shows it on its diagnostics page
 
+--save FILE.sav puts a save in the file (any size up to 64 KB; a .sav from the Super Nt, MiSTer,
+an emulator or tools/savedump.py). tools/savedump.py patch replaces the save in an existing file.
 --pad SIZE appends filler after the ROM (whole file SIZE bytes), only for transfer tests.
 --length SECONDS sets the ID666 song length (default 999, the most the text tag holds; a
 short one is a test of what the player does when a "song" ends: snes_load v2 logs it).
@@ -46,6 +53,7 @@ import zlib
 
 INFO_OFF = 0x10180
 ROM_OFF = 0x10200
+SAVE_OFF, SAVE_MAX = 0x100, 0x10000     # the SPC700 RAM area: the save (snes_load v8)
 LINK_BASE = 0xFF00
 
 MAP_NAMES = {0: 'LoROM', 1: 'HiROM', 2: 'ExHiROM'}
@@ -76,6 +84,18 @@ def silent_spc(title, length=999):
     spc = hdr + ram + dsp + bytes(64) + ram[0xFFC0:]
     assert len(spc) == 0x10200
     return bytearray(spc)
+
+
+def put_save(spc, info, sav):
+    """The save into the SPC RAM area of spc (the rest of it as silent_spc made it) and its size
+    and CRC-32 into the info block (spc's own copy too if info is None). sav = b'' removes it."""
+    ram = silent_spc('')[SAVE_OFF:SAVE_OFF + SAVE_MAX]
+    ram[:len(sav)] = sav
+    spc[SAVE_OFF:SAVE_OFF + SAVE_MAX] = ram
+    blk = spc[INFO_OFF:INFO_OFF + 64] if info is None else info
+    struct.pack_into('<II', blk, 0x14, len(sav), zlib.crc32(sav) if sav else 0)
+    if info is None:
+        spc[INFO_OFF:INFO_OFF + 64] = blk
 
 
 PROBE_OFFS = ((0x7FC0, 0x20), (0x81C0, 0x20), (0xFFC0, 0x21), (0x101C0, 0x21))
@@ -154,6 +174,7 @@ def main():
     ap.add_argument('rom')
     ap.add_argument('out')
     ap.add_argument('--title', help='name shown on the diagnostics page and in the ID666 tag')
+    ap.add_argument('--save', metavar='FILE.sav', help='save RAM to load before the boot (<= 64 KB)')
     ap.add_argument('--pad', type=lambda s: int(s, 0), default=0)
     ap.add_argument('--length', type=int, default=999, help='ID666 song length in seconds (1-999)')
     ap.add_argument('--save-probe', type=lambda s: int(s, 16), metavar='RAM',
@@ -178,6 +199,14 @@ def main():
     info[0x13] = hdr['ssize'] if hdr else 0
     name = title.encode('ascii', 'replace')[:32]
     info[0x20:0x40] = name + b' ' * (32 - len(name))
+    if a.save:
+        if a.save_probe is not None:
+            sys.exit('--save and --save-probe both use the SPC RAM area')
+        sav = open(a.save, 'rb').read()
+        if not 0 < len(sav) <= SAVE_MAX:
+            sys.exit(f'{a.save}: {len(sav)} bytes, a save must be 1 to {SAVE_MAX} bytes')
+        put_save(spc, info, sav)
+        print(f'  save {a.save}: {len(sav)} bytes, CRC-32 {zlib.crc32(sav):08X}, at file offset 0x{SAVE_OFF:X}')
     spc[INFO_OFF:INFO_OFF + 64] = info
     data = bytearray(spc + rom)
     if a.pad > len(data):

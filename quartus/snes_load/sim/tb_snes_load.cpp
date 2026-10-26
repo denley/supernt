@@ -41,7 +41,11 @@
 // presses after the boot: for running games), TB_ROMLAT=1 (ROM byte latency histogram, see the loop),
 // TB_FILE2=file.spc, TB_GAME=1 (any ROM: don't check the SA-1
 // test results, check the mapper against TB_TYPE/TB_MASK hex), TB_WIN=lo,hi (the SDRAM model's
-// read window, default 8,8), TB_DEBUG=1.
+// read window, default 8,8), TB_DEBUG=1,
+// TB_SAVE=1 (v8 saves; implies TB_QUIET): the file carries a save (rom2spc.py --save), which must
+// be in BW-RAM at the boot (0s after it); from +100 ms after the boot L+R+SELECT+X opens the save
+// dump, RIGHT turns its pages (every 60 ms), B closes it, and the game must start again. The RAM
+// as the dump showed it goes to <out-prefix>bsram.bin for tools/savedump.py to compare against.
 // Exit status 0 = PASS (last line).
 #include <cstdio>
 #include <cstdlib>
@@ -129,7 +133,8 @@ int main(int argc, char **argv) {
     const std::string fname = argc > 3 ? argv[3] : "build/snes_load/sa1test.spc";
     const std::string fname2 = getenv("TB_FILE2") ? getenv("TB_FILE2") : fname;
     const bool scen = getenv("TB_NOMENU") == nullptr;      // the v2 menu scenario
-    const bool quiet = getenv("TB_QUIET") != nullptr;      // v2 PIC, but no presses after the boot
+    const bool save_tb = getenv("TB_SAVE") != nullptr;     // v8: save loading and the dump
+    const bool quiet = getenv("TB_QUIET") != nullptr || save_tb;   // v2 PIC, but no presses after the boot
     const bool fast = getenv("TB_FAST") != nullptr, game = getenv("TB_GAME") != nullptr;
     std::vector<uint8_t> file;
     {
@@ -153,6 +158,9 @@ int main(int argc, char **argv) {
     const uint32_t info_crc = file[0x1018C] | file[0x1018D] << 8 | file[0x1018E] << 16 | (uint32_t)file[0x1018F] << 24;
     printf("file %s: %zu bytes, CRC-32 %08X; ROM %u bytes, CRC-32 %08X (info block)\n", fname.c_str(),
            file.size(), crc32(file.data(), file.size()), info_size, info_crc);
+
+    const uint32_t sv_len = file[0x10194] | file[0x10195] << 8 | file[0x10196] << 16 | (uint32_t)file[0x10197] << 24;
+    if (save_tb) printf("save in the file: %u bytes\n", sv_len);
 
     auto ctx = std::make_unique<VerilatedContext>();
     auto tb = std::make_unique<Vtb>(ctx.get());
@@ -344,6 +352,16 @@ int main(int argc, char **argv) {
         uint16_t b = 0;
         if (ms >= 30 && ms < 60) b |= 1 << 5;                         // DOWN
         if (ms >= 75 && ms < 105) b |= 1 << 1;                        // Y = RUN
+        if (save_tb && booted) {                                      // v8: the save dump
+            const double t = ms - t_boot1;
+            const uint16_t L = 1 << 10, R = 1 << 11, SEL = 1 << 2, X = 1 << 9, RIGHT = 1 << 7, B = 1 << 0;
+            const int npg = (int)r->tb__DOT__dut__DOT__dnpg;
+            if (t >= 100 && t < 170) b |= L | R | SEL | X;            // open (40 ms in the sim)
+            for (int k = 1; k < npg; k++)                              // page k from +200 + 60 k
+                if (t >= 200 + 60 * k && t < 220 + 60 * k) b |= RIGHT;
+            if (t >= 260 + 60 * npg && t < 280 + 60 * npg) b |= B;    // close
+            return b;
+        }
         if (!booted || quiet) return b;
         const double tb0 = t_boot1;                                    // ms (the core's clock)
         const double t = ms - tb0;
@@ -396,6 +414,12 @@ int main(int argc, char **argv) {
     auto &wram = r->tb__DOT__dut__DOT__snes__DOT__wram__DOT__mem;
     auto px = [&](int yy, int xx) -> uint32_t { const unsigned char *p = &img[(yy * W + xx) * 3]; return p[0] << 16 | p[1] << 8 | p[2]; };
     int mode_seen = 0;
+    auto &bsram = r->tb__DOT__dut__DOT__snes__DOT__bsram__DOT__mem;
+    bool sv_checked = false, sv_ok = false, dump_seen = false, dump_closed = false, reboot = false;
+    int dump_frames = 0, bs_bad = 0, bs_nonzero = 0;
+    unsigned dump_pages_seen = 0;
+    bool bsram_saved = false;
+    int late_pre = -1, late_post = -1;      // SDRAM late reads when the dump opened / closed
 
     auto finish_frame = [&]() {
         if (frame >= 0) {
@@ -406,8 +430,14 @@ int main(int argc, char **argv) {
             fwrite(img.data(), 1, img.size(), f);
             fclose(f);
             const char *mname[] = {"game", "menu", "status", "log"};
-            printf("frame %2d (%6.1f ms): %3d lines, view %s, loader state %d, file bytes %u, SNES %s,"
+            if (r->tb__DOT__dut__DOT__dvalid) {
+                dump_frames++;
+                dump_pages_seen |= 1u << r->tb__DOT__dut__DOT__dpage;
+            }
+            printf("frame %2d (%6.1f ms): %3d lines, view %s%s, loader state %d, file bytes %u, SNES %s,"
                    " WRAM done=%02x results:", frame, now_ns / 1e6, lines_total, mname[mode_seen & 3],
+                   r->tb__DOT__dut__DOT__dvalid ? (std::string(" + SAVE DUMP page ") +
+                       std::to_string(r->tb__DOT__dut__DOT__dpage)).c_str() : "",
                    r->tb__DOT__dut__DOT__ld_state, r->tb__DOT__dut__DOT__n_file,
                    r->tb__DOT__dut__DOT__core_reset ? "reset" : "running", wram[0xfe]);
             for (int k = 0; k < 7; k++) printf(" %d", wram[0x100 + k]);
@@ -468,7 +498,35 @@ int main(int argc, char **argv) {
             if (r->tb__DOT__dut__DOT__p2_std && (r->tb__DOT__dut__DOT__p2_raw & 0x100)) p2_a_seen = true;
             if (!booted && !r->tb__DOT__dut__DOT__core_reset) {
                 booted = true; boot_frame = frame; t_boot1 = r->tb__DOT__dut__DOT__t_boot;
+                if (save_tb && !sv_checked) {             // v8: BW-RAM at the boot = the file's save, then 0s
+                    sv_checked = true;
+                    for (uint32_t k = 0; k < 65536; k++) {
+                        uint8_t want = k < sv_len ? file[0x100 + k] : 0;
+                        if (bsram[k] != want && ++bs_bad <= 5)
+                            printf("BW-RAM %04X = %02X at the boot, expected %02X\n", k, bsram[k], want);
+                        if (bsram[k]) bs_nonzero++;
+                    }
+                    sv_ok = bs_bad == 0 && r->tb__DOT__dut__DOT__sv_state == 1;
+                    printf("save at the boot: %d bytes differ, %d non-zero, sv_state %d\n", bs_bad, bs_nonzero,
+                           r->tb__DOT__dut__DOT__sv_state);
+                }
             }
+            if (save_tb && booted && r->tb__DOT__dut__DOT__dump_on) {
+                if (!dump_seen) late_pre = r->tb__DOT__dut__DOT__sd_late;
+                dump_seen = true;
+                if (!bsram_saved && r->tb__DOT__dut__DOT__core_reset) {   // the RAM is still while the SNES is held
+                    bsram_saved = true;
+                    std::string bn = prefix + "bsram.bin";
+                    FILE *f = fopen(bn.c_str(), "wb");
+                    for (int k = 0; k < 65536; k++) fputc(bsram[k], f);
+                    fclose(f);
+                }
+            }
+            if (save_tb && dump_seen && !r->tb__DOT__dut__DOT__dump_on && !dump_closed) {
+                dump_closed = true;
+                late_post = r->tb__DOT__dut__DOT__sd_late;
+            }
+            if (save_tb && dump_closed && !r->tb__DOT__dut__DOT__core_reset) reboot = true;
             if (sent2 && !wram_cleared && r->tb__DOT__dut__DOT__ld_state == 1) {
                 wram_cleared = true;                   // the second run must write its results anew
                 wram[0xfe] = 0; wram[0xff] = 0;
@@ -607,7 +665,7 @@ int main(int argc, char **argv) {
     bool ok_map = true;
     if (getenv("TB_TYPE")) ok_map &= rt == strtoul(getenv("TB_TYPE"), nullptr, 16);
     if (getenv("TB_MASK")) ok_map &= rm == strtoul(getenv("TB_MASK"), nullptr, 16);
-    ok_diag = diag_frames > 0;
+    ok_diag = diag_frames > 0 || save_tb;   // (TB_SAVE: nobody opens the status page)
     // GSU carts (v7): a read that waited is no fault (the GSU takes its byte 2-6 clk_sys after
     // the address change; sd_late counts against the SA-1's 2): with TB_ROMLAT the histogram
     // decides instead: no byte later than 3 clk_sys edges, no address held >= 3 without its byte
@@ -615,15 +673,32 @@ int main(int argc, char **argv) {
     bool lat_ok = true;
     for (int k = 4; k < 16; k++) lat_ok &= lat_hist[k] == 0;
     for (int k = 3; k < 16; k++) lat_ok &= miss_hist[k] == 0;
+    // TB_SAVE: the dump's reset may cut one ROM read short as it starts (the address goes to 0
+    // while a read waits; nothing takes that byte): one late read then, none before or after
+    bool late_ok = r->tb__DOT__dut__DOT__sd_late == 0;
+    if (save_tb)
+        late_ok = late_pre == 0 && late_post >= 0 && late_post <= 1 &&
+                  (int)r->tb__DOT__dut__DOT__sd_late == late_post;
+    if (save_tb) printf("SDRAM late reads: %d before the dump, %d as it opened, %d after it\n", late_pre,
+                        late_post - late_pre, (int)r->tb__DOT__dut__DOT__sd_late - late_post);
     bool ok_sd = r->tb__DOT__sdram__DOT__errors == 0 &&
-                 (gsu_cart && romlat ? lat_ok : r->tb__DOT__dut__DOT__sd_late == 0) &&
+                 (gsu_cart && romlat ? lat_ok : late_ok) &&
                  r->tb__DOT__dut__DOT__sd_stall == 0 && r->tb__DOT__sdram__DOT__max_ref_gap <= 1673;
-    bool ok = ok_link && ok_browser && ok_cursor && ok_load && ok_map && ok_sd && ok_menu && ok_aram && ok_p2 &&
+    bool ok_save = true;
+    if (save_tb) {
+        const unsigned npg = r->tb__DOT__dut__DOT__dnpg;
+        ok_save = sv_ok && dump_seen && dump_closed && reboot && bsram_saved && dump_pages_seen == (1u << npg) - 1;
+        printf("save: loaded %s, dump %s (%d frames, pages seen %X of %u), closed %s, game started again %s\n",
+               sv_ok ? "ok" : "BAD", dump_seen ? "opened" : "NOT OPENED", dump_frames, dump_pages_seen, npg,
+               dump_closed ? "yes" : "NO", reboot ? "yes" : "NO");
+    }
+    bool ok = ok_save && ok_link && ok_browser && ok_cursor && ok_load && ok_map && ok_sd && ok_menu && ok_aram && ok_p2 &&
               (game || (ok_wram && ok_pix && ok_lock && ok_ring && ok_diag));
     printf("%s: link %s, browser %s, cursor %s, load+verify %s, mapper %s, SDRAM %s, ARAM %s, menu %s, port 2 %s",
            ok ? "PASS" : "FAIL", ok_link ? "ok" : "BAD", ok_browser ? "ok" : "BAD", ok_cursor ? "ok" : "BAD",
            ok_load ? "ok" : "BAD", ok_map ? "ok" : "BAD", ok_sd ? "ok" : "BAD", ok_aram ? "ok" : "BAD",
            ok_menu ? "ok" : "BAD", ok_p2 ? "ok" : "BAD");
+    if (save_tb) printf(", save %s", ok_save ? "ok" : "BAD");
     if (!game)
         printf(", SA-1 tests %s, summary band %s, frame lock %s, line buffer %s, diagnostics over the game %s",
                ok_wram ? "all pass" : "BAD", ok_pix ? "green" : "NOT green", ok_lock ? "ok" : "BAD",

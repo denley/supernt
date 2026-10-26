@@ -35,6 +35,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../common/link_ui.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/rom_loader.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/pad_poll.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../common/overlay.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../common/ram_dump.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../snes_sdram/snes_sdram_core.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../snes/snes_video.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../snes_load/snes_load_top.sv

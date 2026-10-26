@@ -462,7 +462,7 @@ build/snes_load/saveprobe.sav:
 load-spcs: build/snes_load/sa1test.spc build/snes_load/gradius3.spc build/snes_load/kirbyss.spc \
   build/snes_load/kdl3.spc build/snes_load/smrpg.spc build/snes_load/sa1test20.spc \
   build/snes_load/yoshi.spc build/snes_load/starfox.spc build/snes_load/saveprobe.spc \
-  build/snes_load/saveprobe.sav
+  build/snes_load/saveprobe.sav build/snes_load/savetest.spc
 .PHONY: load-spcs
 
 # End-to-end simulation of quartus/snes_load (notes/snes-load.md, "Simulation"): Verilator, the
@@ -477,7 +477,7 @@ SNES_LOAD_FRAMES ?= 62
 SNES_LOAD_SV := quartus/snes_load/sim/tb.sv quartus/snes_load/snes_load_top.sv \
   quartus/snes_sdram/snes_sdram_core.sv quartus/snes/snes_video.sv quartus/common/i2s_out.sv \
   quartus/common/sdram_rom8.sv quartus/common/link_ui.sv quartus/common/rom_loader.sv \
-  quartus/common/pad_poll.sv quartus/common/overlay.sv \
+  quartus/common/pad_poll.sv quartus/common/overlay.sv quartus/common/ram_dump.sv \
   quartus/snes_sdram/sim/sim_models.v \
   quartus/snes_sdram/sim/ddio_model.v quartus/snes_sdram/sim/sdram_cyc.v \
   quartus/snes_load/sim/sim_models.v $(SNES_UP)/main.v
@@ -570,6 +570,30 @@ sim-snes-load-%: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/%.spc
 	  tail -6 build/sim/snes_load_$*.log; \
 	  for f in build/sim/snes_load_$*-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; exit $$s
 
+# sim-snes-load-save (v8): savetest.spc carries a 30000-byte save for a 32 KB BW-RAM; it must be
+# in BW-RAM at the boot (0s after it); the dump is opened, paged through and closed, the game must
+# start again, and tools/savedump.py must read the dump's frames back into exactly the RAM.
+SNES_SAVE_FRAMES ?= 80
+build/snes_load/savetest.spc: build/snes/sa1test.sfc quartus/snes_load/sim/mk_savetest.py tools/rom2spc.py
+	mkdir -p build/snes_load
+	python3 -I quartus/snes_load/sim/mk_savetest.py $< build/snes_load/savetest.sfc build/snes_load/savetest.sav
+	python3 -I tools/rom2spc.py build/snes_load/savetest.sfc $@ --title "SAVE TEST" --save build/snes_load/savetest.sav
+
+sim-snes-load-save: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/savetest.spc
+	mkdir -p build/sim
+	rm -f build/sim/snes_save-*.p?m build/sim/snes_save-*.png
+	TB_SAVE=1 TB_FAST=1 TB_PULSE=45 $(SNES_LOAD_SIM)/obj/Vtb $(SNES_SAVE_FRAMES) build/sim/snes_save- \
+	  build/snes_load/savetest.spc > build/sim/snes_save.log; s=$$?; tail -4 build/sim/snes_save.log; \
+	  for f in build/sim/snes_save-*.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done; [ $$s = 0 ] || exit $$s; \
+	  tools/savedump.py decode build/sim/snes_save-*.png -o build/sim/snes_save.sav --check build/sim/snes_save-bsram.bin
+
+# The Python environment tools/savedump.py needs for decode/render/selftest (it finds it itself).
+savedump-venv: build/venv/.ok
+build/venv/.ok:
+	python3 -m venv build/venv
+	build/venv/bin/pip install -q numpy opencv-python-headless pillow pillow-heif
+	touch $@
+
 sim-snes-load-gradius: $(SNES_LOAD_SIM)/obj/Vtb build/snes_load/gradius3.spc
 	mkdir -p build/sim
 	rm -f build/sim/snes_load_g3-*.p?m
@@ -582,7 +606,7 @@ FORCE:
 clean:
 	rm -rf build out
 
-.PHONY: all clean FORCE sim-mem2 sim-memtest sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader \
+.PHONY: all clean FORCE sim-mem2 sim-memtest sim-snes sim-hwtest sim-screen sim-sdram sim-sdram-rom sim-snes-sdram sim-link-loader sim-snes-load-save savedump-venv \
   sim-sdram-rom8 sim-snes-load sim-snes-load-gradius sim-snes-load-kirby
 # (sim-snes-load-kdl3 / -smrpg come from the pattern rule; phony targets skip implicit rules)
 .SECONDARY:

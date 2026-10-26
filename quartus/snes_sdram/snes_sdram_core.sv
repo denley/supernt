@@ -9,7 +9,8 @@
 // does on the Pocket, minus everything this board doesn't have yet:
 // - WRAM 128 KB, VRAM 2 x 32 KB, ARAM 64 KB (or, ARAM_EXT = 1, outside through the ext_aram
 //   ports) and BW-RAM (BSRAM) are M10K; the cartridge ROM is
-//   served through the rom_* ports (SDRAM, quartus/common/sdram_rom.sv).
+//   served through the rom_* ports (SDRAM, quartus/common/sdram_rom.sv). BW-RAM has a second
+//   port on its own clock (bs_*: quartus/snes_load's save loading and on-screen dump).
 // - No header parsing here: rom_type, rom_mask and ram_mask are inputs (what the Pocket's
 //   rom_parser.sv / MiSTer derive from the header: SA-1 = ROM_TYPE 8'h60, LoROM 00, HiROM 01,
 //   masks = (1024 << size) - 1); quartus/snes_load derives them at run time
@@ -66,10 +67,14 @@ module snes_sdram_core #(
     output wire        ext_aram_rd,
     output wire        ext_aram_wr,
     input  wire [7:0]  ext_aram_q,
-    // BW-RAM/SRAM clear: while held (and reset is held), the RAM is filled with zeros, one byte
-    // per clk_sys (bsram_clr_done when the whole 2^BSRAM_AW bytes are done)
-    input  wire        bsram_clr,
-    output reg         bsram_clr_done = 1'b0
+    // BW-RAM/SRAM second port (quartus/snes_load v8: the save from the file is written here while
+    // the core is held in reset, and the on-screen dump reads it), on clock bs_clk, one cycle of
+    // read latency; tie bs_we low when unused
+    input  wire                bs_clk,
+    input  wire [BSRAM_AW-1:0] bs_addr,
+    input  wire [7:0]          bs_d,
+    input  wire                bs_we,
+    output wire [7:0]          bs_q
 );
     // Reset as in MAIN_SNES: released on a fixed phase of a 4-cycle divider.
     reg       reset_n = 1'b0;
@@ -169,19 +174,10 @@ module snes_sdram_core #(
         snes_sdram_spram #(.AW(16)) aram (
             .clk(clk_sys), .addr(aram_addr), .d(aram_d), .we(~aram_ce_n & ~aram_we_n), .q(aram_q));
     end endgenerate
-    reg  [BSRAM_AW-1:0] clr_a = {BSRAM_AW{1'b0}};
-    always @(posedge clk_sys)
-        if (!bsram_clr) begin
-            clr_a <= {BSRAM_AW{1'b0}};
-            bsram_clr_done <= 1'b0;
-        end else if (!bsram_clr_done) begin
-            clr_a <= clr_a + 1'd1;
-            if (&clr_a) bsram_clr_done <= 1'b1;
-        end
-    wire clr_on = bsram_clr && !bsram_clr_done;
-    snes_sdram_spram #(.AW(BSRAM_AW)) bsram (
-        .clk(clk_sys), .addr(clr_on ? clr_a : bsram_addr[BSRAM_AW-1:0]), .d(clr_on ? 8'h00 : bsram_d),
-        .we(clr_on | (~bsram_ce_n & ~bsram_we_n)), .q(bsram_q));
+    snes_sdram_tdpram #(.AW(BSRAM_AW)) bsram (
+        .clk_a(clk_sys), .addr_a(bsram_addr[BSRAM_AW-1:0]), .d_a(bsram_d),
+        .we_a(~bsram_ce_n & ~bsram_we_n), .q_a(bsram_q),
+        .clk_b(bs_clk), .addr_b(bs_addr), .d_b(bs_d), .we_b(bs_we), .q_b(bs_q));
 endmodule
 
 // Single-port RAM, registered address, new data on read-during-write (as bram.vhd's spram).
@@ -200,4 +196,34 @@ module snes_sdram_spram #(parameter AW = 8, parameter DW = 8) (
             q <= d;
         end else
             q <= mem[addr];
+endmodule
+
+// True dual-port RAM, one clock per port (Intel's template: M10K), new data on a same-port
+// read-during-write; a read of a byte the other port writes in the same cycle is undefined.
+// Powers up as zero.
+module snes_sdram_tdpram #(parameter AW = 8, parameter DW = 8) (
+    input  wire          clk_a,
+    input  wire [AW-1:0] addr_a,
+    input  wire [DW-1:0] d_a,
+    input  wire          we_a,
+    output reg  [DW-1:0] q_a,
+    input  wire          clk_b,
+    input  wire [AW-1:0] addr_b,
+    input  wire [DW-1:0] d_b,
+    input  wire          we_b,
+    output reg  [DW-1:0] q_b
+);
+    (* ramstyle = "M10K" *) reg [DW-1:0] mem [0:(1 << AW) - 1] /* verilator public_flat_rw */;
+    always @(posedge clk_a)
+        if (we_a) begin
+            mem[addr_a] <= d_a;
+            q_a <= d_a;
+        end else
+            q_a <= mem[addr_a];
+    always @(posedge clk_b)
+        if (we_b) begin
+            mem[addr_b] <= d_b;
+            q_b <= d_b;
+        end else
+            q_b <= mem[addr_b];
 endmodule

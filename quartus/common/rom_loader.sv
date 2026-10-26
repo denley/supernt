@@ -4,7 +4,20 @@
 // stores the ROM part in SDRAM (sdram_rom8.sv, byte k of the ROM at SDRAM byte k), works out
 // the mapper from the ROM header, reads the whole ROM back from SDRAM and compares its CRC-32,
 // and then lets the SNES run. File layout (tools/rom2spc.py): a complete .spc (0x10200 bytes)
-// with an info block at 0x10180-0x101BF ("SNTROM01", ROM size, ROM CRC-32, name), then the ROM.
+// with an info block at 0x10180-0x101BF ("SNTROM01", ROM size, ROM CRC-32, save size and
+// CRC-32, name), then the ROM.
+//
+// v8, save loading: a save (up to 64 KB) travels in the .spc's SPC700 RAM area, file offsets
+// 0x100-0x100FF (the core never plays the .spc part), its size and CRC-32 in info block bytes
+// 0x14-0x1B. Every byte of that area goes to SDRAM at SAVE_BASE (bank 3, after the ARAM) as it
+// arrives; whether it is a save is only known from the info block, which comes later. Before
+// the boot (SHOW, or FAIL with force_boot), after the ARAM clear, BW-RAM/SRAM is set up through
+// its second port (bs_*, a toggle handshake to the caller's clock domain), all 64 KB:
+//   - same game as the last boot (ram_keep): left as it is (the RAM is newer than any file);
+//   - else, a save in the file whose CRC-32 matches when read back from SDRAM: the save, then 0s;
+//   - else 0s.
+// sv_state: 0 no save in the file, 1 loaded, 2 bad CRC (not loaded, RAM cleared), 3 not used
+// (RAM kept).
 //
 // States (`state`):
 //   0 IDLE    no file yet (the player's file browser is on screen)
@@ -34,7 +47,8 @@ module rom_loader #(
     parameter integer CLK_KHZ  = 107210,
     parameter integer DONE_MS  = 250,
     parameter integer SHOW_MS  = 4000,
-    parameter [31:0]  FILE_BASE = 32'h0000_FF00
+    parameter [31:0]  FILE_BASE = 32'h0000_FF00,
+    parameter integer BSRAM_AW = 16
 ) (
     input  wire        clk,
     input  wire [31:0] ms,                  // time (link_ui)
@@ -95,18 +109,30 @@ module rom_loader #(
     output reg         ok_info = 1'b0,      // crc_sd == info_crc (and sizes match)
     output reg         ok_fly = 1'b0,       // crc_sd == crc_rom
     // v2: save RAM kept across reloads of the same game (ROM CRC-32 as the last game booted);
-    // BW-RAM/SRAM is cleared (by the top, while `ram_clear`) when another game is booted
+    // otherwise set up anew before the boot (v8: from the file's save, see above)
     output reg         ram_keep = 1'b0,     // valid from SHOW on
-    output wire        ram_clear,           // SHOW and not ram_keep: the top clears the RAM
     output reg  [31:0] last_game = 32'd0,   // ROM CRC-32 of the game booted last (0: none)
-    output reg         aram_clr_done = 1'b0 // ARAM (SDRAM bank 3) cleared for this boot
+    output reg         aram_clr_done = 1'b0, // ARAM (SDRAM bank 3) cleared for this boot
+    // v8: save loading (see above). bs_a/bs_d are stable from a bs_req toggle until bs_ack (from
+    // the caller's clock domain, synchronised here) equals bs_req again.
+    output reg         bs_req = 1'b0,
+    output reg  [BSRAM_AW-1:0] bs_a = {BSRAM_AW{1'b0}},
+    output reg  [7:0]  bs_d = 8'd0,
+    input  wire        bs_ack,
+    output reg         bs_done = 1'b0,      // BW-RAM set up for this boot
+    output wire [31:0] sv_size,             // info block: save size (0 = none)
+    output wire [31:0] sv_crc,              // info block: save CRC-32
+    output reg  [31:0] sv_crc_sd = 32'd0,   // CRC-32 of the save read back from SDRAM
+    output reg  [1:0]  sv_state = 2'd0
 );
     localparam [2:0] S_IDLE = 0, S_LOAD = 1, S_PARSE = 2, S_VERIFY = 3, S_SHOW = 4, S_RUN = 5,
                      S_FAIL = 6, S_NOTROM = 7;
     localparam [31:0] ROM_OFF = 32'h10200, INFO_OFF = 32'h10180;
+    localparam [31:0] SAV_OFF = 32'h100;          // the .spc's SPC700 RAM area: the save
     localparam [22:0] ARAM_BASE = 23'h600000;     // sdram_rom8.sv's ARAM bank
+    localparam [22:0] SAVE_BASE = 23'h610000;     // the save area as it arrived (64 KB)
+    localparam [16:0] BS_BYTES = 17'd1 << BSRAM_AW;
     reg  [16:0] aclr = 17'd0;                     // ARAM bytes cleared (SHOW)
-    assign ram_clear = (state == S_SHOW || state == S_FAIL) && !ram_keep;
 
     function [31:0] crc8(input [31:0] c, input [7:0] b);    // reflected CRC-32, one byte
         integer i;
@@ -122,7 +148,7 @@ module rom_loader #(
     // ------------------------------------------------------------ stage 1: decode the byte
     wire [31:0] off = f_addr - FILE_BASE;
     wire [31:0] k   = off - ROM_OFF;            // ROM offset (valid if off >= ROM_OFF)
-    reg         b_go = 1'b0, b_rom = 1'b0, b_info = 1'b0;
+    reg         b_go = 1'b0, b_rom = 1'b0, b_info = 1'b0, b_sav = 1'b0;
     reg  [31:0] b_off = 32'd0, b_k = 32'd0;
     reg  [7:0]  b_d = 8'd0;
     reg  [1:0]  b_area = 2'd0;
@@ -135,19 +161,22 @@ module rom_loader #(
         b_d <= f_data;
         b_rom <= off >= ROM_OFF;
         b_info <= off >= INFO_OFF && off < INFO_OFF + 32'h40;
+        b_sav <= off >= SAV_OFF && off < SAV_OFF + 32'h10000;
         b_hdr <= k[31:5] == 27'h3FE || k[31:5] == 27'h7FE || k[31:5] == 27'h207FE;  // 7FC0 FFC0 40FFC0 + 0..1F
         b_area <= k[22] ? 2'd2 : k[15] ? 2'd1 : 2'd0;
     end
 
     // ------------------------------------------------------------ info block and header bytes
-    reg [7:0] info [0:19];                      // info block bytes 0x00-0x13
+    reg [7:0] info [0:27];                      // info block bytes 0x00-0x1B
     integer ii;
-    initial for (ii = 0; ii < 20; ii = ii + 1) info[ii] = 8'd0;
+    initial for (ii = 0; ii < 28; ii = ii + 1) info[ii] = 8'd0;
     assign info_ok = {info[0], info[1], info[2], info[3], info[4], info[5], info[6], info[7]} ==
                      64'h534E54524F4D3031;      // "SNTROM01"
     assign info_size = {info[11], info[10], info[9], info[8]};
     assign info_crc  = {info[15], info[14], info[13], info[12]};
     assign info_type = info[17];
+    assign sv_size   = {info[23], info[22], info[21], info[20]};
+    assign sv_crc    = {info[27], info[26], info[25], info[24]};
     // header fields 0x15-0x1F per area
     reg [7:0] hf [0:2][0:10];
     integer ai, fi;
@@ -259,10 +288,28 @@ module rom_loader #(
         got_all_q <= got_all && !b_go;
         idle_long_q <= idle_long && !b_go;
     end
+    // ------------------------------------------------------------ v8: before the boot
+    // ARAM clear, then BW-RAM: sv_ph 0 decide, 1 CRC-32 of the staged save, 2 next byte (read it
+    // from SDRAM or 0), 3 wait for the write's handshake
+    (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+    reg  [1:0]  ack_s = 2'b00;
+    always @(posedge clk) ack_s <= {ack_s[0], bs_ack};
+    reg  [1:0]  sv_ph = 2'd0;
+    reg  [16:0] sv_len = 17'd0;                   // save bytes in the file (0: none)
+    reg  [16:0] sv_a = 17'd0, sv_n = 17'd0;
+    reg         sv_ok = 1'b0, sv_wait = 1'b0;
+    reg  [31:0] scrc = 32'hFFFFFFFF;
+    wire        sv_has = info_ok && sv_size != 32'd0 && sv_size <= 32'h10000;
+    wire        prep_run = state == S_SHOW || (state == S_FAIL && force_boot);
+
     always @(posedge clk) begin
         push <= 1'b0;
         t_we <= 1'b0;
         fifo_clr <= 1'b0;
+        // (v8) a read the controller took ends the request whatever the state: a new file that
+        // cut a verify or a save read short would otherwise leave aux_req up, and aux reads
+        // win over the write FIFO
+        if (aux_ack) aux_req <= 1'b0;
         // ---- every file byte (stage 2)
         if (b_go && state == S_RUN && !accept) begin
             n_ign <= n_ign + 32'd1;
@@ -282,10 +329,13 @@ module rom_loader #(
                 n_big <= 32'd0;
                 t_start <= ms;
                 n_loads <= n_loads + 8'd1;
-                for (ii = 0; ii < 20; ii = ii + 1) info[ii] <= 8'd0;
+                for (ii = 0; ii < 28; ii = ii + 1) info[ii] <= 8'd0;
                 for (ai = 0; ai < 3; ai = ai + 1) for (fi = 0; fi < 11; fi = fi + 1) hf[ai][fi] <= 8'd0;
                 ok_info <= 1'b0; ok_fly <= 1'b0;
                 fifo_clr <= 1'b1;
+                bs_done <= 1'b0;
+                sv_ph <= 2'd0;
+                sv_state <= 2'd0;
             end else begin
                 n_file <= n_file + 32'd1;
                 if (b_off + 32'd1 > file_end) file_end <= b_off + 32'd1;
@@ -298,7 +348,14 @@ module rom_loader #(
                 end
             end
             t_last <= ms;
-            if (b_info && b_off[5:0] < 6'd20) info[b_off[5:0]] <= b_d;
+            if (b_info && b_off[5:0] < 6'd28) info[b_off[5:0]] <= b_d;
+            if (b_sav) begin                    // (v8) the save area, to SDRAM as it is
+                if (f_full) n_drop <= n_drop + 32'd1;
+                else begin
+                    push <= 1'b1;
+                    push_d <= {SAVE_BASE + {7'd0, b_off[15:0] - 16'h0100}, b_d};
+                end
+            end
             if (b_info && b_off[5]) begin
                 t_we <= 1'b1; t_wa <= {2'd3, b_off[4:0]}; t_wd <= b_d;
             end
@@ -317,7 +374,63 @@ module rom_loader #(
                     if (b_k[4:0] >= 5'h15) hf[b_area][b_k[4:0] - 5'h15] <= b_d;
                 end
             end
-        end else case (state)
+        end else begin
+          if (prep_run) begin
+            if (!aram_clr_done) begin
+                // ARAM to zero (as the block RAM it replaces powered up), through the write FIFO
+                if (!f_full && !push) begin
+                    push <= 1'b1;
+                    push_d <= {ARAM_BASE + {6'd0, aclr}, 8'h00};
+                    aclr <= aclr + 17'd1;
+                    if (aclr == 17'hFFFF) aram_clr_done <= 1'b1;
+                end
+            end else if (!bs_done && f_empty && !wr_req) case (sv_ph)
+                2'd0: begin
+                    sv_a <= 17'd0; sv_n <= 17'd0; scrc <= 32'hFFFFFFFF; sv_wait <= 1'b0;
+                    sv_len <= sv_has ? sv_size[16:0] : 17'd0;
+                    if (ram_keep) begin
+                        bs_done <= 1'b1;
+                        sv_state <= sv_has ? 2'd3 : 2'd0;
+                    end else begin
+                        sv_ok <= 1'b0;
+                        sv_ph <= sv_has ? 2'd1 : 2'd2;
+                    end
+                end
+                2'd1: begin
+                    if (!aux_req && sv_a < sv_len && sv_a == sv_n && sd_ready) begin
+                        aux_req <= 1'b1; aux_addr <= SAVE_BASE + {6'd0, sv_a};
+                    end
+                    if (aux_ack) begin aux_req <= 1'b0; sv_a <= sv_a + 17'd1; end
+                    if (aux_valid) begin scrc <= crc8(scrc, aux_q); sv_n <= sv_n + 17'd1; end
+                    if (sv_a == sv_len && sv_n == sv_len) begin
+                        sv_crc_sd <= ~scrc;
+                        sv_ok <= ~scrc == sv_crc;
+                        sv_a <= 17'd0;
+                        sv_ph <= 2'd2;
+                    end
+                end
+                2'd2: begin
+                    if (sv_a == BS_BYTES) begin
+                        bs_done <= 1'b1;
+                        sv_state <= sv_len == 17'd0 ? 2'd0 : sv_ok ? 2'd1 : 2'd2;
+                    end else if (sv_ok && sv_a < sv_len) begin
+                        if (!aux_req && !sv_wait && sd_ready) begin
+                            aux_req <= 1'b1; aux_addr <= SAVE_BASE + {6'd0, sv_a}; sv_wait <= 1'b1;
+                        end
+                        if (aux_ack) aux_req <= 1'b0;
+                        if (aux_valid) begin
+                            bs_a <= sv_a[BSRAM_AW-1:0]; bs_d <= aux_q; bs_req <= ~bs_req;
+                            sv_wait <= 1'b0; sv_ph <= 2'd3;
+                        end
+                    end else begin
+                        bs_a <= sv_a[BSRAM_AW-1:0]; bs_d <= 8'h00; bs_req <= ~bs_req;
+                        sv_ph <= 2'd3;
+                    end
+                end
+                2'd3: if (ack_s[1] == bs_req) begin sv_a <= sv_a + 17'd1; sv_ph <= 2'd2; end
+            endcase
+          end
+          case (state)
             S_LOAD: if (got_all_q && f_empty || idle_long_q) begin
                 t_end <= ms;
                 crc_file <= ~fcrc;
@@ -368,17 +481,12 @@ module rom_loader #(
                     ram_keep <= last_game != 32'd0 && last_game == ~vcrc;
                     aclr <= 17'd0;
                     aram_clr_done <= 1'b0;
+                    bs_done <= 1'b0;
+                    sv_ph <= 2'd0;
                 end
             end
             S_SHOW: begin
-                // ARAM to zero (as the block RAM it replaces powered up), through the write FIFO
-                if (!aram_clr_done && !f_full && !push) begin
-                    push <= 1'b1;
-                    push_d <= {ARAM_BASE + {6'd0, aclr}, 8'h00};
-                    aclr <= aclr + 17'd1;
-                    if (aclr == 17'hFFFF) aram_clr_done <= 1'b1;
-                end
-                if (ms - t_show >= SHOW_MS && aram_clr_done && f_empty && !wr_req) begin
+                if (ms - t_show >= SHOW_MS && bs_done && f_empty && !wr_req) begin
                     rom_en <= 1'b1;
                     t_boot <= ms;
                     last_game <= crc_sd;
@@ -386,13 +494,7 @@ module rom_loader #(
                 end
             end
             S_FAIL: if (force_boot) begin
-                if (!aram_clr_done && !f_full && !push) begin
-                    push <= 1'b1;
-                    push_d <= {ARAM_BASE + {6'd0, aclr}, 8'h00};
-                    aclr <= aclr + 17'd1;
-                    if (aclr == 17'hFFFF) aram_clr_done <= 1'b1;
-                end
-                if (aram_clr_done && f_empty && !wr_req) begin
+                if (bs_done && f_empty && !wr_req) begin
                     rom_en <= 1'b1;
                     t_boot <= ms;
                     last_game <= crc_sd;
@@ -400,6 +502,7 @@ module rom_loader #(
                 end
             end
             default: ;
-        endcase
+          endcase
+        end
     end
 endmodule

@@ -11,7 +11,9 @@
 #                           "5 SA1 TEST 20S.spc" (20 s song length), "6 Yoshi's Island.spc",
 #                           "7 Star Fox.spc" (Super FX, v7; the player's browser sorts
 #                           case-sensitively: right below GO BACK), "8 SAVE PROBE.spc" and its
-#                           save "SAVES/SNES/8 SAVE PROBE.sav" (notes/snes-load.md, the probe)
+#                           save "SAVES/SNES/8 SAVE PROBE.sav" (notes/snes-load.md, the probe),
+#                           "9 SAVE TEST.spc" (v8: carries a save). A save already in a card
+#                           file (tools/savedump.py) is carried over into the new copy.
 #
 # The console only loads SYSTEM/CORES/spc.cor, so each test is a swap of that file.
 # `use 00` puts the stock JB7.2 core back.
@@ -56,9 +58,20 @@ use)
 roms)
 	for p in "sa1test:0 SA1 TEST" "gradius3:1 Gradius III" "kirbyss:2 Kirby Super Star" \
 	    "kdl3:3 Kirby's Dream Land 3" "smrpg:4 Super Mario RPG" "sa1test20:5 SA1 TEST 20S" \
-	    "yoshi:6 Yoshi's Island" "starfox:7 Star Fox" "saveprobe:8 SAVE PROBE"; do
+	    "yoshi:6 Yoshi's Island" "starfox:7 Star Fox" "saveprobe:8 SAVE PROBE" "savetest:9 SAVE TEST"; do
 		f=build/snes_load/${p%%:*}.spc
-		if [ -f "$f" ]; then cp "$f" "$SD/SPC/${p#*:}.spc"; echo "SPC/${p#*:}.spc"; fi
+		d="$SD/SPC/${p#*:}.spc"
+		[ -f "$f" ] || continue
+		sav=$(mktemp)
+		if [ "${p%%:*}" != savetest ] && [ -f "$d" ] && python3 -I tools/savedump.py extract "$d" "$sav" >/dev/null; then
+			cp "$f" "$d"
+			python3 -I tools/savedump.py patch "$d" "$sav" >/dev/null
+			echo "SPC/${p#*:}.spc (its save kept)"
+		else
+			cp "$f" "$d"
+			echo "SPC/${p#*:}.spc"
+		fi
+		rm -f "$sav"
 	done
 	if [ -f build/snes_load/saveprobe.sav ]; then
 		mkdir -p "$SD/SAVES/SNES"
@@ -68,7 +81,7 @@ roms)
 	sync
 	;;
 *)
-	sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 	;;
 esac

@@ -37,6 +37,11 @@
 // While the menu view is up a new file from the PIC replaces the game. On the status page L+R+UP
 // / DOWN / LEFT (0.5 s) toggle the options: pad poll timing (stock / v1 fast), PIC pad registers
 // (always / gated) and follow (on / off). L+R+A (0.5 s): boot after a failed verify.
+// v8, saves: a save in the file (tools/rom2spc.py --save, tools/savedump.py) is loaded into
+// BW-RAM/SRAM before the boot unless the same game ran last (rom_loader.sv); L+R+SELECT+X (1 s)
+// during a game opens the save dump (ram_dump.sv: the RAM as cells for a photo or a capture,
+// 4 KB a page), which holds the SNES in reset (the game starts again afterwards; the RAM stays):
+// RIGHT / LEFT next / previous page, START pages by itself every 3 s, B or L+R+SELECT+X closes it.
 //
 // Pins: board clock W16; HDMI transmitter video/audio and controller port 1 as quartus/snes;
 // the PIC32 link as quartus/hwtest; SDRAM command/address/DQ/clock as quartus/hwtest with AB10
@@ -231,8 +236,13 @@ module top #(
     wire [1:0]  ld_kind /* verilator public_flat_rd */;
     wire [11:0] scores /* verilator public_flat_rd */;
     wire [15:0] hdr_compl;
-    wire        ram_keep /* verilator public_flat_rd */, ram_clear;
+    wire        ram_keep /* verilator public_flat_rd */;
     wire [31:0] last_game;
+    wire        bs_req, bs_done /* verilator public_flat_rd */;
+    wire [BSRAM_AW-1:0] bs_a, bs_addr_v, dump_addr;
+    wire [7:0]  bs_d, bs_q_v;
+    wire [31:0] sv_size /* verilator public_flat_rd */, sv_crc, sv_crc_sd;
+    wire [1:0]  sv_state /* verilator public_flat_rd */;
     reg         force_v = 1'b0;                      // clk_vid: L+R+A held
     reg         accept_v = 1'b0;                     // clk_vid: the file browser is shown
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
@@ -241,7 +251,7 @@ module top #(
         force_m <= {force_m[0], force_v};
         accept_m <= {accept_m[0], accept_v};
     end
-    rom_loader #(.CLK_KHZ(107210), .DONE_MS(DONE_MS), .SHOW_MS(SHOW_MS)) ld (
+    rom_loader #(.CLK_KHZ(107210), .DONE_MS(DONE_MS), .SHOW_MS(SHOW_MS), .BSRAM_AW(BSRAM_AW)) ld (
         .clk(clk_mem), .ms(ms), .f_go(f_go), .f_addr(f_addr), .f_data(f_data),
         .force_boot(force_m[1]), .accept(accept_m[1]),
         .sd_ready(sd_ready), .wr_req(wr_req), .wr_addr(wr_addr), .wr_data(wr_data),
@@ -256,16 +266,20 @@ module top #(
         .info_type(info_type), .kind(ld_kind), .sa1(ld_sa1), .gsu(ld_gsu), .chip_unsup(ld_unsup),
         .scores(scores), .hdr_w0(hdr_w0), .hdr_w1(hdr_w1), .hdr_compl(hdr_compl),
         .ok_info(ok_info), .ok_fly(ok_fly),
-        .ram_keep(ram_keep), .ram_clear(ram_clear), .last_game(last_game), .aram_clr_done());
+        .ram_keep(ram_keep), .last_game(last_game), .aram_clr_done(),
+        .bs_req(bs_req), .bs_a(bs_a), .bs_d(bs_d), .bs_ack(bs_ack_v), .bs_done(bs_done),
+        .sv_size(sv_size), .sv_crc(sv_crc), .sv_crc_sd(sv_crc_sd), .sv_state(sv_state));
 
     // ================================================================ SNES
     (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
-    reg [1:0]  run_sync = 2'b00;
+    reg [1:0]  run_sync = 2'b00, dump_sync = 2'b00;
     reg [15:0] rst_cnt = 16'd0;
     reg        core_reset /* verilator public_flat_rd */ = 1'b1;
+    reg        dump_on /* verilator public_flat_rd */ = 1'b0;       // clk_vid: the save dump is up
     always @(posedge clk_sys) begin
         run_sync <= {run_sync[0], rom_en};
-        if (!run_sync[1]) begin
+        dump_sync <= {dump_sync[0], dump_on};
+        if (!run_sync[1] || dump_sync[1]) begin
             rst_cnt    <= 16'd0;
             core_reset <= 1'b1;
         end else if (rst_cnt != RESET_CYCLES)
@@ -277,9 +291,6 @@ module top #(
     wire        dotclk, hde, vde, high_res, v224;
     wire [15:0] audio_l /* verilator public_flat_rd */, audio_r;
     wire        joy_strb, joy1_clk, joy2_clk /* verilator public_flat_rd */, joy_d0, joy2_d0;
-    (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
-    reg [1:0]  clr_sync = 2'b00;
-    always @(posedge clk_sys) clr_sync <= {clr_sync[0], ram_clear};
     snes_sdram_core #(.BSRAM_AW(BSRAM_AW), .ARAM_EXT(1), .USE_GSU(USE_GSU), .USE_SA1(USE_SA1)) snes (
         .clk_sys(clk_sys), .reset(core_reset), .rom_type(rom_type), .rom_mask(rom_mask),
         .ram_mask(ram_mask),
@@ -289,7 +300,24 @@ module top #(
         .v224(v224), .audio_l(audio_l), .audio_r(audio_r),
         .joy_strb(joy_strb), .joy_clk(), .joy1_clk(joy1_clk), .joy2_clk(joy2_clk),
         .joy1_d0(joy_d0), .joy2_d0(joy2_d0), .ext_aram_addr(aram_addr), .ext_aram_d(aram_d), .ext_aram_rd(aram_rd), .ext_aram_wr(aram_wr),
-        .ext_aram_q(aram_q), .bsram_clr(clr_sync[1] & core_reset), .bsram_clr_done());
+        .ext_aram_q(aram_q), .bs_clk(clk_vid), .bs_addr(bs_addr_v), .bs_d(bs_wd_v), .bs_we(bs_we_v),
+        .bs_q(bs_q_v));
+
+    // BW-RAM's second port (clk_vid): the loader's writes before a boot (toggle handshake from
+    // clk_mem; bs_a/bs_d are stable by the time the synchronised toggle is seen), the dump's reads
+    (* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+    reg [1:0]  bsr_s = 2'b00;
+    reg        bs_ack_v = 1'b0, bs_we_v = 1'b0;
+    reg [BSRAM_AW-1:0] bs_wa_v = {BSRAM_AW{1'b0}};
+    reg [7:0]  bs_wd_v = 8'd0;
+    always @(posedge clk_vid) begin
+        bsr_s <= {bsr_s[0], bs_req};
+        bs_we_v <= 1'b0;
+        if (bsr_s[1] != bs_ack_v) begin
+            bs_we_v <= 1'b1; bs_wa_v <= bs_a; bs_wd_v <= bs_d; bs_ack_v <= bsr_s[1];
+        end
+    end
+    assign bs_addr_v = dump_on ? dump_addr : bs_wa_v;
 
     // virtual controllers (MiSTer ioport.sv): {B Y SELECT START UP DOWN LEFT RIGHT A X L R 0000},
     // latched on the strobe, shifted at the start of each clock pulse of their port, 0 on the
@@ -373,21 +401,34 @@ module top #(
     wire follow_on = opt_follow && pic_act_v[1] && pic_shown;
 
     // button combinations, exact (no other button held), held for COMBO_MS / MENU_MS
-    localparam [11:0] B_SEL = 12'h004, B_START = 12'h008, B_UP = 12'h010, B_DOWN = 12'h020,
-                      B_LEFT = 12'h040, B_A = 12'h100, B_L = 12'h400, B_R = 12'h800;
+    localparam [11:0] B_B = 12'h001, B_SEL = 12'h004, B_START = 12'h008, B_UP = 12'h010,
+                      B_DOWN = 12'h020, B_LEFT = 12'h040, B_RIGHT = 12'h080, B_A = 12'h100,
+                      B_X = 12'h200, B_L = 12'h400, B_R = 12'h800;
     localparam [11:0] LR = B_L | B_R;
     wire [2:0] combo = btn == (LR | B_SEL)           ? 3'd1 :     // pages
                        btn == (LR | B_SEL | B_START) ? 3'd2 :     // menu view
                        btn == (LR | B_A)             ? 3'd3 :     // boot anyway
                        btn == (LR | B_UP)            ? 3'd4 :     // option: poll timing
                        btn == (LR | B_DOWN)          ? 3'd5 :     // option: PIC pad gating
-                       btn == (LR | B_LEFT)          ? 3'd6 : 3'd0;  // option: follow
+                       btn == (LR | B_LEFT)          ? 3'd6 :     // option: follow
+                       btn == (LR | B_SEL | B_X)     ? 3'd7 : 3'd0;  // save dump
     reg [10:0] hold = 11'd0;
     reg [2:0]  held = 3'd0;                         // the combination acted on (until released)
     reg [2:0]  combo_d = 3'd0;
     reg [1:0]  diag_v = 2'd0;                       // 0 off, 1 status page, 2 log view
     reg        menu_t /* verilator public_flat_rd */ = 1'b0;   // menu view by the keys
-    wire [10:0] need = combo == 3'd2 ? MENU_MS[10:0] : COMBO_MS[10:0];
+    wire [10:0] need = combo == 3'd2 || combo == 3'd7 ? MENU_MS[10:0] : COMBO_MS[10:0];
+    // save dump (v8): page, auto paging, dump id (ms since configuration at the opening)
+    reg  [3:0]  dpage /* verilator public_flat_rd */ = 4'd0;
+    reg         dauto = 1'b0;
+    reg  [11:0] dauto_ms = 12'd0;
+    reg  [31:0] ms_v = 32'd0, dump_id = 32'd0;
+    reg  [11:0] btn_d = 12'd0;
+    wire [11:0] bpress = btn & ~btn_d;
+    wire [16:0] dsize = ram_mask[23:16] != 8'd0 ? 17'h10000 :
+                        ram_mask == 24'd0 ? 17'd0 : {1'b0, ram_mask[15:0]} + 17'd1;   // static while running
+    wire [4:0]  dnpg /* verilator public_flat_rd */ = dsize[16:12] + {4'd0, dsize[11:0] != 12'd0};
+    wire [3:0]  dlast = dnpg == 5'd0 ? 4'd0 : dnpg[3:0] - 4'd1;
     always @(posedge clk_vid) begin
         combo_d <= combo;
         force_v <= 1'b0;
@@ -404,8 +445,21 @@ module top #(
                 3'd4: if (diag_v == 2'd1) opt_fast <= ~opt_fast;
                 3'd5: if (diag_v == 2'd1) opt_gate <= ~opt_gate;
                 3'd6: if (diag_v == 2'd1) opt_follow <= ~opt_follow;
+                3'd7: if (dump_on || st_v == S_RUN) begin
+                    dump_on <= ~dump_on; dpage <= 4'd0; dauto <= 1'b0; dump_id <= ms_v;
+                end
                 default: ;
             endcase
+        end
+        if (ms_tick) ms_v <= ms_v + 32'd1;
+        btn_d <= btn;
+        if (dump_on) begin
+            if (st_v != S_RUN || bpress == B_B) dump_on <= 1'b0;
+            if (bpress == B_RIGHT || (dauto && ms_tick && dauto_ms == 12'd2999))
+                dpage <= dpage == dlast ? 4'd0 : dpage + 4'd1;
+            if (bpress == B_LEFT) dpage <= dpage == 4'd0 ? dlast : dpage - 4'd1;
+            if (bpress == B_START) dauto <= ~dauto;
+            if (ms_tick) dauto_ms <= dauto_ms == 12'd2999 ? 12'd0 : dauto_ms + 12'd1;
         end
         if (held == 3'd3) force_v <= 1'b1;
         st_prev <= st_v;
@@ -439,7 +493,7 @@ module top #(
         if (st_v != S_RUN || pic_act_v[1]) sel_pulse <= 9'd0;
         else if (dsel_now && !dsel_d) sel_pulse <= SEL_PULSE_MS[8:0];
         else if (ms_tick && sel_pulse != 9'd0) sel_pulse <= sel_pulse - 9'd1;
-        snes_pad_v <= st_v == S_RUN && !menu_up;
+        snes_pad_v <= st_v == S_RUN && !menu_up && !dump_on;
         accept_v   <= menu_up && st_v == S_RUN;
     end
 
@@ -524,7 +578,9 @@ module top #(
     assign st[48] = {23'd0, log_a_n};
     genvar gi;
     assign st[49] = p2_raw;
-    generate for (gi = 50; gi < 56; gi = gi + 1) begin : g_st0
+    assign st[50] = sv_size;
+    assign st[51] = sv_crc;
+    generate for (gi = 52; gi < 56; gi = gi + 1) begin : g_st0
         assign st[gi] = 32'd0;
     end endgenerate
     wire [1791:0] stat;
@@ -600,10 +656,13 @@ module top #(
                  st_v != S_RUN ? "               " :
                  !menu_up ? (pic_act_v[1] ? "view GAME+PIC  " : "view GAME      ") :
                  menu_t ? "view MENU(keys)" : "view MENU(PIC) "};
-        s_ram = {ram_mask == 24'd0 ? "none (header RAM size 0)                " :
-                 ld_state < S_SHOW || ld_state == S_NOTROM ? "64 KB block RAM                         " :
-                 ram_keep ? "64 KB: KEPT (same game as last boot)    " :
-                            "64 KB: CLEARED (another game)           ", 240'd0};
+        s_ram = {ld_state < S_SHOW || ld_state == S_NOTROM ? "64 KB block RAM               " :
+                 !bs_done ? "SETTING UP                    " :
+                 ram_keep ? "KEPT (same game as last boot) " :
+                 sv_state == 2'd1 ? "LOADED FROM THE FILE          " :
+                 sv_state == 2'd2 ? "FILE SAVE BAD CRC: CLEARED    " :
+                 ram_mask == 24'd0 ? "none (header RAM size 0)      " :
+                                     "CLEARED (no save in the file) ", 320'd0};
     end
     always @(posedge clk_vid) begin
         ext_t <= ext_row == 5'd7 || ext_row == 5'd8;
@@ -640,9 +699,16 @@ module top #(
         vd2 <= vd1;
         vd3 <= vd2;
     end
-    wire [7:0] mr = ovalid ? or_ : vd3[23:16];
-    wire [7:0] mg = ovalid ? og  : vd3[15:8];
-    wire [7:0] mb = ovalid ? ob  : vd3[7:0];
+    // the save dump (v8), over everything
+    wire [7:0] dr, dg, db;
+    wire       dvalid /* verilator public_flat_rd */;
+    ram_dump #(.AW(BSRAM_AW)) dump (
+        .clk(clk_vid), .hx(cx), .vy(cy), .on(dump_on), .page(dpage), .size(dsize),
+        .game_crc(last_game), .dump_id(dump_id), .rom_type(rom_type), .ram_byte(hdr_w0[7:0]),
+        .ram_addr(dump_addr), .ram_q(bs_q_v), .r(dr), .g(dg), .b(db), .valid(dvalid));
+    wire [7:0] mr = dvalid ? dr : ovalid ? or_ : vd3[23:16];
+    wire [7:0] mg = dvalid ? dg : ovalid ? og  : vd3[15:8];
+    wire [7:0] mb = dvalid ? db : ovalid ? ob  : vd3[7:0];
     reg so0 = 1'b0, so1 = 1'b0, so2 = 1'b0;
     always @(posedge clk_vid) begin
         {so0, so1, so2} <= vd3[26:24];

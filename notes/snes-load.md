@@ -18,7 +18,9 @@ reads the pad registers over the link** (0x2000/0x2001 every ~33 ms) and wakes o
 it doesn't watch the controller lines. v5 (console run 23 Oct) passed DOWN+SELECT through to it
 during games: nothing woke it (its log: 0x2000 read as 0x24 279 times). v6 (this version, "v6
 in short") sends it SELECT alone instead: **works on the console** (23 Oct). v7 ("v7 in short")
-adds the **Super FX (GSU)** next to the SA-1; not yet run on the console.
+adds the **Super FX (GSU)** next to the SA-1 (v7.2 works on the console, 24 Oct). v8 ("Saves
+(v8)") adds **saves**: loaded from the game's file before the boot, read out by an on-screen
+dump that `tools/savedump.py` turns back into the file; not yet run on the console.
 
 ## v7 in short (23-24 Oct 2026): Super FX (works on the console, v7.2)
 
@@ -459,6 +461,71 @@ probe".
 status and pad reads, nothing else. The SPC player's MENU OPTIONS doesn't even have the JB's
 PROMPT WHEN SAVING RAM. SD saves are out of reach from our core; the in-RAM saves above are
 what there is.
+
+## Saves (v8): loaded from the file, read out through the screen
+
+The card stays out of reach (above), so a save travels the two ways the core does have:
+
+- **In: inside the game's .spc.** `rom2spc.py --save X.sav` (or `tools/savedump.py patch
+  FILE.spc X.sav` on an existing file, `-` to take it out) puts the save (up to 64 KB) into the
+  SPC700 RAM area, file offsets 0x100-0x100FF, and its size and CRC-32 into info block bytes
+  0x14-0x1B. The core never plays the .spc part; the PIC sends the whole file as before.
+  `rom_loader.sv` writes every byte of that area to SDRAM at 0x610000 (bank 3 after the ARAM)
+  as it arrives (whether it is a save is only known from the info block, which comes later).
+  Before the boot (SHOW, after the ARAM clear) it sets up all 64 KB of BW-RAM/SRAM through the
+  RAM's new second port (`snes_sdram_core.sv`: a true dual-port M10K, port B on clk_vid; the
+  loader hands it bytes with a toggle handshake from clk_mem):
+  - same game as the last boot (ROM CRC-32): the RAM is kept (it is newer than any file);
+  - otherwise a save whose CRC-32 matches when read back from SDRAM: the save, then 0s;
+  - otherwise 0s (as v2's clear, which this replaces).
+  The status page's "save RAM" line says which (`KEPT`, `LOADED FROM THE FILE`, `FILE SAVE
+  BAD CRC: CLEARED`, `CLEARED (no save in the file)`), with the file's save size and CRC-32.
+- **Out: the save dump** (`quartus/common/ram_dump.sv`). **L+R+SELECT+X held 1 s** during a
+  game shows the RAM as black and white cells, 4 KB a page (a page box row above the frame
+  shows which); **RIGHT/LEFT** turn pages, **START** turns them every 3 s by itself, **B** (or
+  the combination again) closes it. The SNES is held in reset while it is up, so the RAM is
+  still for the pictures and the game starts again afterwards with the RAM as it was (like the
+  reset button: save in the game first). The dump covers the header's RAM size (2 KB-64 KB:
+  1-16 pages). Layout: 1280x720, cells 4 x 4 pixels, a white frame 2 cells thick (outer box
+  cells X 20-298, Y 14-165, inside the usual TV overscan), timing row/column of alternating
+  cells, 145 rows of 34 bytes (272 cells, MSB first, white = 1): a header row ("SNTD", format,
+  page, page count, cell size, dump size, game ROM CRC-32, dump id = ms since configuration,
+  ROM_TYPE, RAM size byte), 128 rows of 32 data bytes, each of these rows ending in a
+  CRC-16/CCITT-FALSE over page, row and data, and 16 parity rows (XOR of the rows r mod 16 = g,
+  computed while the frame is drawn, in one more M10K), so a lost row per group, or any band of
+  up to 16 adjacent rows, can be rebuilt.
+- **Back to a .sav: `tools/savedump.py decode`** reads photos (JPEG/PNG/HEIC) or recordings
+  (`~/scratch/cap/rec-*.mkv`) of the pages, in any order and number: it finds the frame (largest
+  quadrilateral whose timing pattern fits, any of 4 rotations, edges refined to the sub-pixel
+  50 % crossing), warps it to 8 pixels a cell, sharpens, thresholds against white/black levels
+  interpolated from the frame and its inner black gap, checks every row's CRC, retries failed
+  rows with small shifts and threshold offsets, takes rows a picture got wrong from another
+  picture of the same page, rebuilds the rest from parity, and only writes the .sav when every
+  page is complete (otherwise it names the pages to photograph again). `--spc DIR` puts the
+  result straight into the .spc with the same ROM CRC-32 (e.g. the card's `SPC/`).
+  It needs OpenCV: `make savedump-venv` (build/venv; the script uses it by itself).
+  `tools/sdcore roms` keeps the save of a card file it overwrites.
+
+**Simulation (26 Oct): PASS.** `make sim-snes-load-save` (`savetest.spc`: the SA-1 test ROM
+with RAM size byte 05 = 32 KB and a 30000-byte save, `quartus/snes_load/sim/mk_savetest.py`;
+TB_SAVE in `tb_snes_load.cpp`): BW-RAM at the boot = the save then 0s (0 bytes differ,
+LOADED); L+R+SELECT+X opens the dump, RIGHT shows all 8 pages, B closes it, the game starts
+again and the SA-1 tests pass; every dump frame is **pixel-identical** to `savedump.py`'s own
+rendering of the RAM, and `savedump.py decode` of the 80 frames gives exactly the RAM
+(`build/sim/snes_save-bsram.bin`; the SA-1 test itself changes 255 bytes below 0x700 while it
+runs). The same frames through `savedump.py`'s simulated phone photo (perspective, blur, light
+gradient, a glare spot, noise, JPEG) decode exactly too, as do its own `selftest` photos (8/8
+seeds at strength 1.0 and 1.5; at 2.0, a very skewed and blurred shot, some rows stay
+unreadable and it asks for another picture). One SDRAM read counts as late as the dump opens:
+the reset moves the ROM address to 0 while a read waits; nothing takes that byte (the
+testbench allows exactly that one). `make sim-snes-load` (no save in the file, the second
+load keeps the RAM): PASS.
+
+Workflow: play, save in the game, L+R+SELECT+X, photograph each page (RIGHT between them), B;
+then, any time before the next session, the photos and the card into homebox and
+`tools/savedump.py decode PHOTOS... --spc /mnt/sd/SPC`; the next load of that game says
+`LOADED FROM THE FILE`. Loading another game in between costs nothing as long as the dump was
+taken (the file has the save).
 
 ## SDRAM ARAM port (v2, `sdram_rom8.sv`)
 

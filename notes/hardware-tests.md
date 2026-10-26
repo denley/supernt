@@ -35,6 +35,32 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
+## Next session: snes_load v8, saves (prepared 26 Oct)
+
+Questions: does a save in the file reach BW-RAM, and can `tools/savedump.py` read the dump
+back, from the capture and from phone photos? (`notes/snes-load.md`, "Saves (v8)".) Core:
+`20-q-snes_load-v8` as spc.cor (`tools/sdcore setup` numbers it; check `list`). On the card:
+`SPC/9 SAVE TEST.spc` (the SA-1 test ROM with a 32 KB BW-RAM header and a 30000-byte save,
+`build/snes_load/savetest.sav`).
+
+1. Capture running (`tools/capview.py`).
+2. Tools → Play SPC Files → **9 SAVE TEST** (Y). On the status page before the boot: save RAM
+   **LOADED FROM THE FILE**, file 07530 / its CRC-32. The SA-1 test screen as always.
+3. **L+R+SELECT+X**, held about a second: the dump, page box 1 of 8 lit. Hold still ~2 s, then
+   **RIGHT**, ~2 s per page, through page 8. Then photograph **pages 1-3** with the phone (LEFT
+   to go back), straight on and from an angle, anything goes. **B**: the test screen comes back.
+4. DOWN+SELECT, then a real game with save RAM (e.g. **4 Super Mario RPG** or **2 Kirby Super
+   Star**): play to a save point and save in the game; L+R+SELECT+X, photograph every page
+   (RIGHT between them); B; power off.
+5. Card and photos to homebox: `tools/savedump.py decode PHOTOS... --spc /mnt/sd/SPC`, and
+   `tools/savedump.py decode ~/scratch/cap/rec-*.mkv -o /tmp/cap.sav` for the capture.
+6. Card back: load the game again: **LOADED FROM THE FILE**, and the game's save is there.
+
+Reading: step 2's status line; step 3's capture decodes to exactly `savetest.sav` (+ zeros to
+32 KB, unless the SA-1 test writes BW-RAM: compare with the simulation's
+`build/sim/snes_save-bsram.bin`); the photos decode (or say which pages to retake); step 6
+continues the game.
+
 ## Save probe (19-q-snes_load-v72, 24 Oct ~09:55) results: no save handling
 
 Recording `~/scratch/cap/rec-20261024-095404.mkv` (frames `~/scratch/cap/probe/`, 1 fps). The

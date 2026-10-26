@@ -189,7 +189,7 @@ module top #(
         .v224(v224), .audio_l(audio_l), .audio_r(audio_r),
         .joy_strb(joy_strb), .joy_clk(joy_clk), .joy1_clk(), .joy2_clk(), .joy1_d0(joy_d0),
         .joy2_d0(1'b1), .ext_aram_addr(), .ext_aram_d(), .ext_aram_rd(), .ext_aram_wr(), .ext_aram_q(8'h00),
-        .bsram_clr(1'b0), .bsram_clr_done()
+        .bs_clk(clk_sys), .bs_addr(11'd0), .bs_d(8'd0), .bs_we(1'b0), .bs_q()
     );
 
     // ---------------------------------------------------------------- controller port 1

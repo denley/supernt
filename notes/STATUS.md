@@ -35,8 +35,9 @@ directly). While a game runs the PIC polls our pad registers over the link and w
 console** (23 Oct): it answers 0 during games and sends the PIC a short SELECT-alone press when
 DOWN+SELECT is pressed, so DOWN+SELECT opens the browser and SELECT alone is the game's.
 
-Limits now: saves are kept only while powered and only for the last game loaded (the SPC
-player context has no way to write files to SD); 64 KB save RAM, ROMs up to 6 MB; no Super FX,
+Limits now: the core can't write the SD card (the SPC player context has no way to write
+files); v8 brings saves in through the game's file and out through an on-screen dump read by
+`tools/savedump.py` (next step 3); 64 KB save RAM, ROMs up to 6 MB; no Super FX,
 DSP, CX4, SDD-1, SPC7110 (DSP-1..4, CX4, OBC1, ST010/11 already work with JB's own "Browse SD
 Card" loader, BIOS files are on the card in `/BIOS`).
 
@@ -71,9 +72,15 @@ Card" loader, BIOS files are on the card in `/BIOS`).
    Star Fox and the SA-1 games all work (`notes/hardware-tests.md`, "snes_load v7.2 results";
    `TESTCORES/19-q-snes_load-v72.cor` is the card's spc.cor).
 2. Optional: DSP-1 in our core (small; vendor `DSPn`), larger ROMs, more games.
-3. Not possible: saves to SD from the SPC player context. Decoded, and the last way in (an SPC
-   file that looks like a ROM with save RAM, the "save probe") failed on the console 24 Oct
-   (`notes/hardware-tests.md`, "Save probe ... results").
+3. Saves. Not possible through the PIC: the SPC player never writes the card, decoded, and
+   the last way in (an SPC file that looks like a ROM with save RAM, the "save probe") failed on
+   the console 24 Oct (`notes/hardware-tests.md`, "Save probe ... results"). **v8 (26 Oct)
+   works around it** (`notes/snes-load.md`, "Saves (v8)"): a save travels inside the game's
+   .spc and is loaded before the boot, and L+R+SELECT+X shows the save RAM on screen as a
+   code that `tools/savedump.py` reads back from phone photos or a capture into the .spc.
+   Next: the console run (`notes/hardware-tests.md`, "Next session: snes_load v8"). Later, a
+   save module on controller port 2's D1 line (a Raspberry Pi: automatic, no photos) was
+   discussed with Denley 25 Oct; it needs D1's FPGA pin found first.
 
 ## Console test workflow (keep runs few: each costs Denley a card swap and menu navigation)
 
