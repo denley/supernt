@@ -497,7 +497,12 @@ The card stays out of reach (above), so a save travels the two ways the core doe
 - **Back to a .sav: `tools/savedump.py decode`** reads photos (JPEG/PNG/HEIC) or recordings
   (`~/scratch/cap/rec-*.mkv`) of the pages, in any order and number: it finds the frame (largest
   quadrilateral whose timing pattern fits, any of 4 rotations, edges refined to the sub-pixel
-  50 % crossing), warps it to 8 pixels a cell, sharpens, thresholds against white/black levels
+  50 % crossing, searched from up to 7 cells outside the quadrilateral found, since on a
+  projector the frame merges with the lit screen and only its inside comes out), warps it to 8
+  pixels a cell, measures where the cell grid really is (in tiles of 12 cells, the phase of the
+  cell edges folded modulo a cell, unwrapped, a cubic plus local corrections: a projected
+  picture bends by over a cell; the whole-cell ambiguity is settled by the timing row and
+  column), sharpens, thresholds against white/black levels
   interpolated from the frame and its inner black gap, checks every row's CRC, retries failed
   rows with small shifts and threshold offsets, takes rows a picture got wrong from another
   picture of the same page, rebuilds the rest from parity, and only writes the .sav when every
@@ -526,6 +531,10 @@ load keeps the RAM): PASS.
 port takes the same blocks), **timing met at all four corners** (worst setup +0.294 ns at slow
 85 °C, hold +0.110 ns at fast 0 °C), pin check 87 user I/Os as assigned. Kept as
 `~/src/supernt/out/q-snes_load-v8.cor` (for TESTCORES 20).
+
+**Console (19 Nov): works** (notes/hardware-tests.md, "snes_load v8 results"): the save in the
+file reached BW-RAM, and 16 phone photos of a projector screen (SAVE TEST and a Super Mario RPG
+save, 8 pages each) all decode completely.
 
 Workflow: play, save in the game, L+R+SELECT+X, photograph each page (RIGHT between them), B;
 then, any time before the next session, the photos and the card into homebox and

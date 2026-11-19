@@ -173,16 +173,19 @@ def frame_candidates(gray):
     for _, q in out:
         if all(np.abs(q - k).max() > 0.004 * max(h, w) for k in keep):
             keep.append(q)
-    return [edge_refine(gray, q) for q in keep]
+    # each also searched from further out: when the frame merges with something bright around it
+    # (a projector screen's lit edge), the quadrilateral found is the frame's inside, ~3 cells in
+    return [edge_refine(gray, q, reach) for q in keep for reach in (1.6, 4.5, 7.0)]
 
 
-def edge_refine(gray, q):
+def edge_refine(gray, q, reach=1.6):
     """The frame's outer edge where the brightness crosses halfway from the dark margin to the
-    white frame, measured across each side at 60 places (sub-pixel), a line fitted to each side."""
+    white frame, measured across each side at 60 places (sub-pixel), a line fitted to each side;
+    the search starts `reach` cells outside q."""
     q = order_corners(q.astype(np.float32))
     cs = float(np.sqrt(cv2.contourArea(q) / (BW * BH)))          # cell size in pixels
     g = cv2.GaussianBlur(gray.astype(np.float32), (0, 0), max(0.5, 0.15 * cs))
-    s = np.arange(-1.6 * cs, 1.6 * cs, 0.25, dtype=np.float32)    # along the outward normal
+    s = np.arange(-1.6 * cs, reach * cs, 0.25, dtype=np.float32)  # along the outward normal
     lines = []
     for i in range(4):
         a, b = q[i], q[(i + 1) % 4]
@@ -195,7 +198,7 @@ def edge_refine(gray, q):
         found = []
         for k in range(len(t)):
             pr = prof[k]
-            lo, hi = np.median(pr[-int(0.4 * cs / 0.25) - 1:]), pr[:len(s) // 2 + 2].max()
+            lo, hi = np.median(pr[-int(0.4 * cs / 0.25) - 1:]), pr.max()
             if hi - lo < 20:
                 continue
             mid = (lo + hi) / 2
@@ -265,8 +268,11 @@ def order_corners(q):
 
 
 class Sampler:
-    """The frame warped to PPC pixels a cell, cell means and the black/white threshold."""
+    """The frame warped to PPC pixels a cell, cell means and the black/white threshold. The
+    cells are sampled at their centres plus a smooth correction field (fx, fy: warp pixels per
+    cell), zero until refine() measures where the grid really is."""
     PPC = 8
+    TILE = 12                                                        # cells, for refine()
 
     def __init__(self, gray, quad):
         p = self.PPC
@@ -279,15 +285,84 @@ class Sampler:
         w = cv2.warpPerspective(g, H, (BW * p, BH * p), flags=cv2.INTER_LINEAR)
         # unsharp mask: a lone cell keeps its contrast against a blurry picture
         self.w = w + 1.0 * (w - cv2.GaussianBlur(w, (0, 0), 0.5 * p))
+        self.box = cv2.blur(self.w, (p // 2 + 1, p // 2 + 1))          # the middle of a cell, averaged
+        self.fx = np.zeros((BH, BW), np.float32)
+        self.fy = np.zeros((BH, BW), np.float32)
         self.thr, self.con = self.threshold_map()
 
     def means(self, dx=0.0, dy=0.0):
-        """Mean of the middle half of every cell (BH x BW), shifted by (dx, dy) cells."""
+        """Mean of the middle of every cell (BH x BW), shifted by (dx, dy) cells."""
         p = self.PPC
-        M = np.float32([[1, 0, -dx * p], [0, 1, -dy * p]])
-        w = cv2.warpAffine(self.w, M, (BW * p, BH * p), borderMode=cv2.BORDER_REPLICATE) if dx or dy else self.w
-        c = w.reshape(BH, p, BW, p)[:, p // 4:p - p // 4, :, p // 4:p - p // 4]
-        return c.mean(axis=(1, 3))
+        cx = ((np.arange(BW) + 0.5 + dx) * p - 0.5)[None, :] + self.fx
+        cy = ((np.arange(BH) + 0.5 + dy) * p - 0.5)[:, None] + self.fy
+        return cv2.remap(self.box, cx.astype(np.float32), cy.astype(np.float32), cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_REPLICATE)
+
+    def refine(self):
+        """Where the cell grid really is, for pictures that aren't one perspective view of a flat
+        screen (a projector's lens or a sagging screen bend the picture by a cell or more over the
+        frame): in overlapping tiles of TILE cells, the phase of the cell edges (the sum of the
+        brightness gradient folded modulo a cell) gives the local offset of the grid; the offsets
+        are unwrapped from tile to tile, a smooth cubic is fitted to them, and of the whole-cell
+        ambiguities the one whose timing row and column fit best is kept."""
+        p, T = self.PPC, self.TILE
+        gx = np.abs(cv2.Sobel(self.w, cv2.CV_32F, 1, 0, ksize=3))
+        gy = np.abs(cv2.Sobel(self.w, cv2.CV_32F, 0, 1, ksize=3))
+        ex = np.exp(2j * np.pi * (np.arange(BW * p) + 0.5) / p)
+        ey = np.exp(2j * np.pi * (np.arange(BH * p) + 0.5) / p)
+        txs, tys = list(range(0, BW - T // 2, T // 2)), list(range(0, BH - T // 2, T // 2))
+        fields = []
+        for g, e, axis in ((gx, ex, 0), (gy, ey, 1)):
+            val = np.full((len(tys), len(txs)), np.nan)
+            wt = np.zeros_like(val)
+            for j, ty in enumerate(tys):
+                for i, tx in enumerate(txs):
+                    blk = g[ty * p:min(BH, ty + T) * p, tx * p:min(BW, tx + T) * p]
+                    prof = blk.sum(axis=axis)
+                    ph = e[tx * p:tx * p + len(prof)] if axis == 0 else e[ty * p:ty * p + len(prof)]
+                    z = (prof * ph).sum()
+                    r = abs(z) / (prof.sum() + 1e-6)
+                    if r > 0.12:
+                        val[j, i], wt[j, i] = np.angle(z) / (2 * np.pi) * p, r
+            fields.append((unwrap(val, wt, p), wt))
+        tx_c = (np.array(txs) + T / 2) / BW
+        ty_c = (np.array(tys) + T / 2) / BH
+        U, V = np.meshgrid(tx_c, ty_c)
+        cu = (np.arange(BW) + 0.5) / BW
+        cv_ = (np.arange(BH) + 0.5) / BH
+        CU, CV = np.meshgrid(cu, cv_)
+        fit = []
+        # tile coordinates of each cell (for the local corrections)
+        mx = ((np.arange(BW) + 0.5 - T / 2) / (T // 2)).astype(np.float32)[None, :].repeat(BH, 0)
+        my = ((np.arange(BH) + 0.5 - T / 2) / (T // 2)).astype(np.float32)[:, None].repeat(BW, 1)
+        for val, wt in fields:
+            ok = ~np.isnan(val)
+            if ok.sum() < 20:
+                return False
+            A = poly_terms(U[ok], V[ok]) * wt[ok][:, None]
+            coef, *_ = np.linalg.lstsq(A, val[ok] * wt[ok], rcond=None)
+            f = (poly_terms(CU.ravel(), CV.ravel()) @ coef).reshape(BH, BW)
+            # what the cubic misses, locally: the residuals of nearby tiles, weighted (normalised
+            # convolution, so tiles without cell edges don't pull it to 0)
+            res = np.where(ok, val - (poly_terms(U.ravel(), V.ravel()) @ coef).reshape(U.shape), 0)
+            w = np.where(ok, wt, 0).astype(np.float32)
+            num = cv2.GaussianBlur((res * w).astype(np.float32), (0, 0), 1.0)
+            den = cv2.GaussianBlur(w, (0, 0), 1.0)
+            loc = np.where(den > 0.05, num / np.maximum(den, 1e-6), 0).astype(np.float32)
+            f += cv2.remap(loc, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+            fit.append(f.astype(np.float32))
+        best = None
+        for kx in (-2, -1, 0, 1, 2):
+            for ky in (-2, -1, 0, 1, 2):
+                self.fx, self.fy = fit[0] + kx * p, fit[1] + ky * p
+                self.thr, self.con = self.threshold_map()
+                sc = timing_score(self.bits())
+                if best is None or sc > best[0]:
+                    best = (sc, kx, ky)
+        _, kx, ky = best
+        self.fx, self.fy = fit[0] + kx * p, fit[1] + ky * p
+        self.thr, self.con = self.threshold_map()
+        return True
 
     def threshold_map(self):
         """Midway between white and black, each interpolated over the box from the frame (white,
@@ -307,6 +382,37 @@ class Sampler:
         """Cells above the threshold (+ bias x the local white-black contrast)."""
         m = self.means(dx, dy)
         return m > self.thr + bias * self.con
+
+
+def poly_terms(u, v):
+    """Cubic in u, v (the correction fields' model)."""
+    return np.stack([np.ones_like(u), u, v, u * u, u * v, v * v, u ** 3, u * u * v, u * v * v, v ** 3], axis=-1)
+
+
+def unwrap(val, wt, p):
+    """Tile offsets (modulo p, NaN where unknown) made continuous: from the surest tile outwards,
+    each tile moved by whole periods to be nearest its already placed neighbours."""
+    out = np.full_like(val, np.nan)
+    if np.isnan(val).all():
+        return out
+    start = np.unravel_index(np.argmax(np.where(np.isnan(val), -1, wt)), val.shape)
+    out[start] = val[start]
+    todo = [start]
+    seen = {start}
+    while todo:
+        todo.sort(key=lambda t: -wt[t])                     # surest first
+        j, i = todo.pop(0)
+        for dj in (-1, 0, 1):
+            for di in (-1, 0, 1):
+                n = (j + dj, i + di)
+                if n in seen or not (0 <= n[0] < val.shape[0] and 0 <= n[1] < val.shape[1]) or np.isnan(val[n]):
+                    continue
+                ref = np.nanmean([out[a, b] for a in range(n[0] - 1, n[0] + 2) for b in range(n[1] - 1, n[1] + 2)
+                                  if 0 <= a < val.shape[0] and 0 <= b < val.shape[1] and not np.isnan(out[a, b])])
+                out[n] = val[n] + p * np.round((ref - val[n]) / p)
+                seen.add(n)
+                todo.append(n)
+    return out
 
 
 def coons(top, bottom, left, right):
@@ -340,14 +446,20 @@ BIASES = (0.0, -0.15, 0.15)
 def read_picture(gray):
     """Rows of the first frame candidate that looks like a dump: (header, page, {r: row}, parity
     {g: row}, score) or None."""
-    for quad in frame_candidates(gray)[:6]:
+    for quad in frame_candidates(gray)[:18]:
         for rot in range(4):
             q = np.roll(quad, -rot, axis=0)
             try:
                 s = Sampler(gray, q)
             except cv2.error:
                 continue
-            if timing_score(s.bits()) < 0.9:
+            sc = timing_score(s.bits())
+            if sc < 0.98:                                          # bent picture? measure the grid
+                fx, fy, thr, con = s.fx, s.fy, s.thr, s.con
+                if not s.refine() or timing_score(s.bits()) < sc:
+                    s.fx, s.fy, s.thr, s.con = fx, fy, thr, con
+                sc = max(sc, timing_score(s.bits()))
+            if sc < 0.9:
                 continue
             good, par, page, hdr = {}, {}, None, None
             for dx, dy in SHIFTS:

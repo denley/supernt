@@ -78,7 +78,9 @@ Card" loader, BIOS files are on the card in `/BIOS`).
    works around it** (`notes/snes-load.md`, "Saves (v8)"): a save travels inside the game's
    .spc and is loaded before the boot, and L+R+SELECT+X shows the save RAM on screen as a
    code that `tools/savedump.py` reads back from phone photos or a capture into the .spc.
-   Next: the console run (`notes/hardware-tests.md`, "Next session: snes_load v8"). Later, a
+   **Works on the console (19 Nov):** the save from the file loads, and phone photos of the
+   dump (on the projector) decode completely (`notes/hardware-tests.md`, "snes_load v8
+   results"). A Super Mario RPG save from photos is in its card file; next: load it in the game. Later, a
    save module on controller port 2's D1 line (a Raspberry Pi: automatic, no photos) was
    discussed with Denley 25 Oct; it needs D1's FPGA pin found first.
 

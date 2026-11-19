@@ -35,7 +35,26 @@ pulling it.
 | `Super Nt big 1MB.spc` (chord + pattern, `tools/mkbigspc.py`) | 0x100000 | F7596A77 | same first 0x10200 bytes; after 0x10200: BEC73C8F; extra RAM 101C0–101FF 758D6336 |
 | `Gradius III ROM test.spc` (a ROM renamed) | 0x80200 | C5BCC3FF | without the 512-byte copier header CD973979; its first 64 KB 6D739ED0 |
 
-## Next session: snes_load v8, saves (prepared 26 Oct)
+## snes_load v8 (20-q-snes_load-v8, 19 Nov) results: saves work on the console
+
+Denley ran the plan without the capture dongle, on the projector, and took 16 phone photos
+(Pixel, 4000x3000 JPEG, Immich `PXL_20261119_1121*`: 9 SAVE TEST pages 1-8; `..._1131*`: Super
+Mario RPG pages 1-8 after saving at a save point).
+
+- **Save loading works:** the SAVE TEST dump decodes to CRC-32 6AED1EFD, exactly the
+  simulation's BW-RAM (`build/sim/snes_save-bsram.bin`: the 30000-byte save from the file, 0s
+  after it, the SA-1 test's own 255 bytes below 0x700).
+- **The dump and the decoder work from photos:** all 16 decode with every row good (no parity
+  rebuilds needed). Super Mario RPG: 32 KB, CRC-32 951647F2, now in the card's `SPC/4 Super Mario
+  RPG.spc` (copies in `build/saves/`). Not yet checked: loading it back in the game.
+- The first decoder couldn't read any of them; fixed in `tools/savedump.py` (notes/snes-load.md,
+  "Saves (v8)"): on a projector screen the dump's black is the lit screen, so the frame merges
+  with the screen's bright edge and only its inside is found (edges are now also searched from
+  4.5 and 7 cells further out); and the projected picture is bent by up to ~1.3 cells over the
+  frame (lens / screen), which one perspective warp can't follow (the grid is now measured from
+  the cell edges themselves).
+
+## Next session: snes_load v8, saves (prepared 26 Oct; done 19 Nov, results above)
 
 Questions: does a save in the file reach BW-RAM, and can `tools/savedump.py` read the dump
 back, from the capture and from phone photos? (`notes/snes-load.md`, "Saves (v8)".) Core:
