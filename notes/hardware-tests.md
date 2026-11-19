@@ -46,7 +46,8 @@ Mario RPG pages 1-8 after saving at a save point).
   after it, the SA-1 test's own 255 bytes below 0x700).
 - **The dump and the decoder work from photos:** all 16 decode with every row good (no parity
   rebuilds needed). Super Mario RPG: 32 KB, CRC-32 951647F2, now in the card's `SPC/4 Super Mario
-  RPG.spc` (copies in `build/saves/`). Not yet checked: loading it back in the game.
+  RPG.spc` (copies in `build/saves/`). **Loaded back (Denley, 19 Nov): LOADED FROM THE FILE,
+  and the game continued from that save point.** The whole loop works on the console.
 - The first decoder couldn't read any of them; fixed in `tools/savedump.py` (notes/snes-load.md,
   "Saves (v8)"): on a projector screen the dump's black is the lit screen, so the frame merges
   with the screen's bright edge and only its inside is found (edges are now also searched from

@@ -534,7 +534,8 @@ port takes the same blocks), **timing met at all four corners** (worst setup +0.
 
 **Console (19 Nov): works** (notes/hardware-tests.md, "snes_load v8 results"): the save in the
 file reached BW-RAM, and 16 phone photos of a projector screen (SAVE TEST and a Super Mario RPG
-save, 8 pages each) all decode completely.
+save, 8 pages each) all decode completely, and the Mario RPG save, put back into its file,
+loaded and the game continued from it: the whole loop works.
 
 Workflow: play, save in the game, L+R+SELECT+X, photograph each page (RIGHT between them), B;
 then, any time before the next session, the photos and the card into homebox and
